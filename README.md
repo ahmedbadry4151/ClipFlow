@@ -23,7 +23,7 @@ ClipFlow is designed for one thing: saturating your connection while keeping ful
 
 ## Demo
 
-[![ClipFlow launch video — click to play](video/brag.jpg)](video/brag.mp4)
+[![ClipFlow launch video — click to open](video/brag.jpg)](video/brag.mp4)
 
 The 30-second launch video shows the whole flow: paste a link, analyze the formats, pick a quality, and watch parallel workers fill your disk. [Open the MP4 directly](video/brag.mp4) if you prefer.
 

@@ -6,9 +6,8 @@ data/
 *.part
 *.ytdl
 
-# launch media (hosted as hidden GitHub user attachments)
-video/brag.mp4
-video/brag.jpg
+# launch media and source (hosted as a hidden GitHub attachment)
+video/
 
 # python
 __pycache__/

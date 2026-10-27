@@ -23,7 +23,7 @@ ClipFlow is designed for one thing: saturating your connection while keeping ful
 
 ## Demo
 
-https://github.com/user-attachments/assets/cafeb15a-d64f-4cbc-9b1b-3408b225ff28
+https://github.com/user-attachments/assets/0a6dbe2a-d996-4097-98e6-f25633fe437e
 
 The 30-second launch video shows the whole flow: paste a link, analyze the formats, pick a quality, and watch parallel workers fill your disk.
 

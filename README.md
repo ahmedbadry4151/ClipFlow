@@ -1,8 +1,8 @@
-# TurboTube
+# ClipFlow
 
-A fast, self-hosted YouTube downloader with a zero-build web UI, a scriptable CLI, and a parallel download engine built on **yt-dlp**, **aria2c**, and **ffmpeg**.
+**ClipFlow** is a fast, self-hosted YouTube and media downloader with a Positivus-inspired web UI, a scriptable CLI, and a parallel download engine built on **yt-dlp**, **aria2c**, and **ffmpeg**. The download core is **TurboTube**.
 
-TurboTube is designed for one thing: saturating your connection while keeping full control over quality, playlists, subtitles, and output naming.
+ClipFlow is designed for one thing: saturating your connection while keeping full control over quality, playlists, subtitles, and output naming.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -18,6 +18,14 @@ TurboTube is designed for one thing: saturating your connection while keeping fu
 │                  SQLite (WAL) + TT_* config                  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Demo
+
+[![ClipFlow launch video — click to play](video/brag.jpg)](video/brag.mp4)
+
+The 30-second launch video shows the whole flow: paste a link, analyze the formats, pick a quality, and watch parallel workers fill your disk. [Open the MP4 directly](video/brag.mp4) if you prefer.
 
 ---
 
@@ -45,7 +53,7 @@ TurboTube is designed for one thing: saturating your connection while keeping fu
 | aria2c | 1.36+ | optional but strongly recommended for maximum bandwidth |
 | Node.js / Deno / Bun | Node 20+ | solves YouTube's JavaScript challenges; without one, downloads may fail with HTTP 403 |
 
-The `yt-dlp-ejs` challenge-solver package is installed automatically with the Python dependencies. TurboTube auto-detects the first available runtime (`deno`, `node`, `bun`, then `quickjs`).
+The `yt-dlp-ejs` challenge-solver package is installed automatically with the Python dependencies. ClipFlow auto-detects the first available runtime (`deno`, `node`, `bun`, then `quickjs`).
 
 Check everything at once:
 
@@ -72,6 +80,20 @@ sudo apt update && sudo apt install -y ffmpeg aria2 nodejs
 
 ## Quick start
 
+### Windows: one-click start
+
+Double-click **`start.bat`**, or run it from a terminal:
+
+```bat
+start.bat
+```
+
+It checks for Python, installs `requirements.txt` on the first run (and writes a `.installed` marker), then launches `python -m app serve --open` and opens <http://127.0.0.1:8000>.
+
+`start.bat` handles the Python dependencies only. Install `ffmpeg`, `aria2c`, and a JavaScript runtime once, as described in [Requirements](#requirements).
+
+### Manual start (any OS)
+
 ```powershell
 # 1. Install Python dependencies
 python -m pip install -r requirements.txt
@@ -86,7 +108,7 @@ python -m app doctor
 python -m app serve
 ```
 
-Open <http://127.0.0.1:8000>. On Windows you can also double-click **`start.bat`**.
+Open <http://127.0.0.1:8000>.
 
 To expose the server on your LAN (read the [security](#security) section first):
 
@@ -200,7 +222,7 @@ Run `python -m app` with no arguments to start the server (same as `serve`).
 
 ## Performance tuning
 
-TurboTube has three independent concurrency layers. Raising all of them blindly causes throttling, so tune incrementally.
+ClipFlow has three independent concurrency layers. Raising all of them blindly causes throttling, so tune incrementally.
 
 | Knob | Default | What it does |
 | --- | --- | --- |
@@ -325,13 +347,13 @@ ports:
   - "8000:8000"
 ```
 
-Put a TLS reverse proxy (Caddy, nginx, Traefik) in front of it if the traffic leaves your machine. TurboTube speaks plain HTTP and expects the proxy to terminate TLS.
+Put a TLS reverse proxy (Caddy, nginx, Traefik) in front of it if the traffic leaves your machine. ClipFlow speaks plain HTTP and expects the proxy to terminate TLS.
 
 ---
 
 ## Security
 
-TurboTube runs downloads on your behalf, so it treats URLs as untrusted input.
+ClipFlow runs downloads on your behalf, so it treats URLs as untrusted input.
 
 - **SSRF protection** — only `http`/`https`; URLs are resolved and rejected if they point at loopback, private, link-local, CGNAT, multicast, or reserved ranges. DNS answers are cached briefly and re-checked.
 - **Optional allowlist** — set `TT_ALLOWED_HOSTS=youtube.com,youtu.be` to restrict targets outright.
@@ -365,6 +387,7 @@ app/
   main.py          app factory, lifespan, auth, static mount
   static/          index.html, styles.css, app.js, favicon.svg
 tests/             utils, security, formats, manager, API, SSE, CLI
+video/             launch video (brag.mp4), poster, and storyboard notes
 ```
 
 Runtime state:
@@ -380,7 +403,7 @@ Runtime state:
 
 ```powershell
 python -m pip install -r requirements-dev.txt
-python -m pytest              # 51 tests, no network required
+python -m pytest              # 82 tests, no network required
 python -m pytest -k manager
 python -m compileall app
 python -m app serve --reload
@@ -420,7 +443,7 @@ An API key is probably required. The UI prompts on the first API call; clear the
 
 ## Legal
 
-TurboTube is a personal-use tool. Download only content you own or have permission to save, and respect YouTube's Terms of Service and local copyright law. The authors do not host, mirror, or distribute any media.
+ClipFlow is a personal-use tool. Download only content you own or have permission to save, and respect YouTube's Terms of Service and local copyright law. The authors do not host, mirror, or distribute any media.
 
 ## License
 

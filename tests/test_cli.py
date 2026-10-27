@@ -62,3 +62,8 @@ def test_version_flag():
         build_parser().parse_args(["--version"])
     except SystemExit as exc:
         assert exc.code == 0
+
+
+def test_serve_parser_open_flag():
+    args = build_parser().parse_args(["serve", "--open"])
+    assert args.open is True

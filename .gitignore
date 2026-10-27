@@ -1,6 +1,7 @@
 # runtime
 downloads/
 data/
+.installed
 *.log
 *.part
 *.ytdl

@@ -163,6 +163,22 @@ def cmd_serve(args: argparse.Namespace) -> int:
     host = args.host or settings.host
     port = args.port or settings.port
     console.print(f"[bold cyan]TurboTube[/] {__version__} -> http://{host}:{port}")
+
+    if getattr(args, "open", False):
+        import webbrowser
+
+        target_host = "localhost" if host in ("0.0.0.0", "127.0.0.1") else host
+        open_url = f"http://{target_host}:{port}"
+
+        def _open_browser() -> None:
+            time.sleep(1.2)
+            try:
+                webbrowser.open(open_url)
+            except Exception:
+                pass
+
+        threading.Thread(target=_open_browser, daemon=True).start()
+
     if args.reload:
         uvicorn.run(
             "app.main:app",
@@ -430,6 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="start the web UI")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
+    serve.add_argument("--open", action="store_true", help="open web browser automatically on start")
     serve.add_argument("--reload", action="store_true", help="auto-reload (development)")
     serve.set_defaults(func=cmd_serve)
 

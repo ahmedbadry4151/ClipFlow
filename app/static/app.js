@@ -80,6 +80,9 @@ const PREFS = [
   "section",
   "browserCookies",
   "cookieFile",
+  "resume",
+  "pref-resume-partial",
+  "pref-auto-resume",
 ];
 
 /* ------------------------------------------------------------------ utils */
@@ -335,6 +338,10 @@ function loadPrefs() {
   if (prefC && prefs.container) prefC.value = prefs.container;
   const prefA = $("#pref-default-audio");
   if (prefA && prefs.audioFormat) prefA.value = prefs.audioFormat;
+  if (prefs["pref-resume-partial"] !== undefined) {
+    const resumeEl = $("#resume");
+    if (resumeEl) resumeEl.checked = Boolean(prefs["pref-resume-partial"]);
+  }
 }
 
 function savePrefs() {
@@ -388,6 +395,8 @@ function collectOptions() {
     section: value("section"),
     archive: checked("archive"),
     use_aria2: checked("useAria2"),
+    resume: document.getElementById("resume") ? checked("resume") : true,
+    continuedl: document.getElementById("resume") ? checked("resume") : true,
     fragments: Number.isFinite(fragments) ? fragments : null,
     retries: null,
     output_template: "",
@@ -649,10 +658,32 @@ function statusBadge(status) {
   return `<span class="status-badge ${esc(status)}">${esc(label)}</span>`;
 }
 
+function getSmoothedSpeed(job) {
+  if (!job.speed || job.speed <= 0) {
+    if (state.smoothedSpeeds) state.smoothedSpeeds.delete(job.id);
+    return 0;
+  }
+  if (!state.smoothedSpeeds) state.smoothedSpeeds = new Map();
+  const entry = state.smoothedSpeeds.get(job.id);
+  const now = Date.now();
+  const current = Number(job.speed);
+  if (!entry) {
+    state.smoothedSpeeds.set(job.id, { val: current, t: now });
+    return current;
+  }
+  if (now - entry.t < 60) {
+    return entry.val;
+  }
+  const smoothed = entry.val + (current - entry.val) * 0.35;
+  state.smoothedSpeeds.set(job.id, { val: smoothed, t: now });
+  return smoothed;
+}
+
 function jobMetaText(job) {
   const parts = [`${job.completed_items || 0}/${job.total_items || 1} completed`];
   if (job.failed_items) parts.push(`${job.failed_items} failed`);
-  if (job.speed > 0) parts.push(`${bytes(job.speed)}/s`);
+  const liveSpeed = getSmoothedSpeed(job);
+  if (liveSpeed > 0) parts.push(`${bytes(liveSpeed)}/s`);
   if (job.eta) parts.push(`ETA ${duration(job.eta)}`);
   return parts.join(" · ");
 }
@@ -660,7 +691,9 @@ function jobMetaText(job) {
 function jobCardHTML(job) {
   const percent = Math.max(0, Math.min(100, job.percent || 0));
   const canCancel = ["queued", "running", "downloading", "processing"].includes(job.status);
-  const canRetry = (job.failed_items || 0) > 0 || ["failed", "partial", "cancelled", "interrupted"].includes(job.status);
+  const isInterrupted = ["interrupted", "cancelled", "partial"].includes(job.status);
+  const isFailed = job.status === "failed" || (job.failed_items && job.failed_items > 0);
+  const canResume = isInterrupted || isFailed;
   const isRunning = ["running", "downloading", "processing"].includes(job.status);
 
   const thumbUrl = getThumbnail(job);
@@ -676,7 +709,7 @@ function jobCardHTML(job) {
     </span>`;
 
   const hasError = ["failed", "partial", "interrupted"].includes(job.status) && (job.error || (job.failed_items && job.failed_items > 0));
-  const errorText = job.error || (job.failed_items ? `${job.failed_items} item(s) failed during download. Click Retry to retry.` : "Download failed. Check URL or network access.");
+  const errorText = job.error || (job.failed_items ? `${job.failed_items} item(s) failed during download. Click Resume to resume or Restart to start over.` : "Download failed. Check URL or network access.");
   const errorHTML = hasError ? `
     <div class="job-error-banner">
       ${icon("alert")}
@@ -692,23 +725,46 @@ function jobCardHTML(job) {
           <svg class="chev"><use href="#i-chevron"/></svg>
         </summary>
         <div class="job-items-list">
-          ${job.items.map((item) => `
-            <div class="job-item-row">
+          ${job.items.map((item) => {
+            const itemCanResume = ["interrupted", "cancelled", "failed"].includes(item.status);
+            const itemPercent = Math.max(0, Math.min(100, item.percent || 0));
+            return `
+            <div class="job-item-row" data-item-id="${item.id}">
               <span class="job-item-title" title="${esc(item.title)}">#${item.index} ${esc(item.title || "Item")}</span>
               <div class="job-item-meta">
                 ${item.status === "completed" ? `<span style="color:var(--green); font-weight:700;">${icon("check")} Done</span>` :
                   item.status === "failed" ? `<span style="color:var(--red); font-weight:700;" title="${esc(item.error)}">${icon("alert")} Failed</span>` :
-                  item.status === "downloading" ? `<span style="color:var(--accent-text); font-weight:700;">${item.percent.toFixed(0)}%</span>` :
+                  item.status === "downloading" ? `<span style="color:var(--accent-text); font-weight:700;">${itemPercent.toFixed(0)}%</span>` :
+                  item.status === "interrupted" ? `<span style="color:#D99B00; font-weight:700;">${itemPercent > 0 ? `${itemPercent.toFixed(0)}% (Paused)` : 'Paused'}</span>` :
                   `<span class="muted">${esc(item.status)}</span>`}
                 ${item.filepath ? `<span class="muted">(${esc(baseName(item.filepath))})</span>` : ""}
+                ${itemCanResume ? `<button type="button" class="btn micro primary" data-action="resume-item" data-job="${job.id}" data-item="${item.id}" title="Resume this item from partial progress">${icon("play")} Resume</button>` : ""}
               </div>
-            </div>`).join("")}
+            </div>`;
+          }).join("")}
         </div>
       </details>`;
   }
 
+  const resumeBtnHTML = canResume
+    ? `<button type="button" class="btn tiny primary resume-btn" data-action="resume" data-job="${job.id}" title="Resume download from partial progress">${icon("play")}<span>${percent > 0 ? `Resume (${percent.toFixed(0)}%)` : "Resume"}</span></button>`
+    : "";
+  const retryBtnHTML = canResume && (isFailed || isInterrupted)
+    ? `<button type="button" class="btn tiny secondary" data-action="retry" data-job="${job.id}" title="Restart from beginning">${icon("retry")}<span>Restart</span></button>`
+    : "";
+  const cancelBtnHTML = canCancel
+    ? `<button type="button" class="btn tiny danger" data-action="cancel" data-job="${job.id}">${icon("x")}<span>Cancel</span></button>`
+    : "";
+
+  const fillClasses = [
+    "job-progress-fill",
+    isRunning ? (job.status === "processing" ? "processing" : "is-active") : "",
+    isRunning && percent === 0 ? "indeterminate" : "",
+    job.status === "completed" ? "completed" : "",
+  ].filter(Boolean).join(" ");
+
   return `
-    <article class="job-card" data-job="${job.id}">
+    <article class="job-card ${isRunning ? "is-active" : ""}" data-job="${job.id}" data-status="${job.status}">
       <div class="job-head">
         <div class="job-title-row">
           ${thumbHTML}
@@ -720,16 +776,17 @@ function jobCardHTML(job) {
             <h3 class="job-title" title="${esc(job.title)}">${esc(job.title || "Media Download")}</h3>
           </div>
         </div>
-        <div class="job-actions">
-          ${canRetry ? `<button type="button" class="btn tiny secondary" data-action="retry" data-job="${job.id}">${icon("retry")}<span>Retry</span></button>` : ""}
-          ${canCancel ? `<button type="button" class="btn tiny danger" data-action="cancel" data-job="${job.id}">${icon("x")}<span>Cancel</span></button>` : ""}
+        <div class="job-actions" data-last-status="${job.status}">
+          ${resumeBtnHTML}
+          ${retryBtnHTML}
+          ${cancelBtnHTML}
           <button type="button" class="icon-btn" data-action="open" data-job="${job.id}" title="Open Folder">${icon("folder")}</button>
           <button type="button" class="icon-btn danger" data-action="delete" data-job="${job.id}" title="Delete Record">${icon("trash")}</button>
         </div>
       </div>
       <div class="job-progress-wrapper">
         <div class="job-progress-bar">
-          <div class="job-progress-fill ${isRunning && percent === 0 ? "indeterminate" : ""}" style="width: ${percent}%;"></div>
+          <div class="${fillClasses}" style="width: ${percent}%;"></div>
         </div>
       </div>
       <div class="job-meta-row">
@@ -739,6 +796,130 @@ function jobCardHTML(job) {
       ${errorHTML}
       ${itemsAccordionHTML}
     </article>`;
+}
+
+function patchJobCard(card, job) {
+  const percent = Math.max(0, Math.min(100, job.percent || 0));
+  const isRunning = ["running", "downloading", "processing"].includes(job.status);
+  const isInterrupted = ["interrupted", "cancelled", "partial"].includes(job.status);
+  const isFailed = job.status === "failed" || (job.failed_items && job.failed_items > 0);
+  const canResume = isInterrupted || isFailed;
+
+  card.classList.toggle("is-active", isRunning);
+  card.dataset.status = job.status;
+
+  // Status badge update
+  const badgeWrap = card.querySelector(".job-head .status-badge");
+  if (badgeWrap && !badgeWrap.classList.contains(job.status)) {
+    badgeWrap.outerHTML = statusBadge(job.status);
+  }
+
+  // Progress fill update
+  const fill = card.querySelector(".job-progress-fill");
+  if (fill) {
+    fill.style.width = `${percent}%`;
+    fill.className = [
+      "job-progress-fill",
+      isRunning ? (job.status === "processing" ? "processing" : "is-active") : "",
+      isRunning && percent === 0 ? "indeterminate" : "",
+      job.status === "completed" ? "completed" : "",
+    ].filter(Boolean).join(" ");
+  }
+
+  // Meta row update
+  const metaRow = card.querySelector(".job-meta-row");
+  if (metaRow) {
+    const leftText = job.status === "processing" ? "Processing streams (FFmpeg muxing/embedding)…" : jobMetaText(job);
+    const rightText = `${percent.toFixed(percent < 10 ? 1 : 0)}% (${bytes(job.downloaded)} / ${bytes(job.total_bytes)})`;
+    const spans = metaRow.querySelectorAll("span");
+    if (spans.length >= 2) {
+      if (spans[0].textContent !== leftText) spans[0].textContent = leftText;
+      if (spans[1].textContent !== rightText) spans[1].textContent = rightText;
+    }
+  }
+
+  // Actions update when status transitions or percent changes
+  const actionsWrap = card.querySelector(".job-actions");
+  if (actionsWrap) {
+    if (actionsWrap.dataset.lastStatus !== job.status) {
+      actionsWrap.dataset.lastStatus = job.status;
+      const canCancel = ["queued", "running", "downloading", "processing"].includes(job.status);
+
+      const resumeBtn = canResume
+        ? `<button type="button" class="btn tiny primary resume-btn" data-action="resume" data-job="${job.id}" title="Resume download from partial progress">${icon("play")}<span>${percent > 0 ? `Resume (${percent.toFixed(0)}%)` : "Resume"}</span></button>`
+        : "";
+      const retryBtn = canResume && (isFailed || isInterrupted)
+        ? `<button type="button" class="btn tiny secondary" data-action="retry" data-job="${job.id}" title="Restart from beginning">${icon("retry")}<span>Restart</span></button>`
+        : "";
+      const cancelBtn = canCancel
+        ? `<button type="button" class="btn tiny danger" data-action="cancel" data-job="${job.id}">${icon("x")}<span>Cancel</span></button>`
+        : "";
+
+      actionsWrap.innerHTML = `
+        ${resumeBtn}
+        ${retryBtn}
+        ${cancelBtn}
+        <button type="button" class="icon-btn" data-action="open" data-job="${job.id}" title="Open Folder">${icon("folder")}</button>
+        <button type="button" class="icon-btn danger" data-action="delete" data-job="${job.id}" title="Delete Record">${icon("trash")}</button>
+      `;
+    } else if (canResume) {
+      const resumeSpan = actionsWrap.querySelector(".resume-btn span");
+      const resumeText = percent > 0 ? `Resume (${percent.toFixed(0)}%)` : "Resume";
+      if (resumeSpan && resumeSpan.textContent !== resumeText) {
+        resumeSpan.textContent = resumeText;
+      }
+    }
+  }
+
+  // Error banner update
+  const hasError = ["failed", "partial", "interrupted"].includes(job.status) && (job.error || (job.failed_items && job.failed_items > 0));
+  const errorText = job.error || (job.failed_items ? `${job.failed_items} item(s) failed during download. Click Resume to resume or Restart to start over.` : "Download failed. Check URL or network access.");
+  let banner = card.querySelector(".job-error-banner");
+  if (hasError) {
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "job-error-banner";
+      banner.innerHTML = `${icon("alert")}<span>${esc(errorText)}</span>`;
+      if (metaRow) metaRow.after(banner);
+      else card.appendChild(banner);
+    } else {
+      const span = banner.querySelector("span");
+      if (span && span.textContent !== errorText) span.textContent = errorText;
+    }
+  } else if (banner) {
+    banner.remove();
+  }
+
+  // Update accordion summary count if present
+  const summarySpan = card.querySelector(".job-items-summary span");
+  if (summarySpan) {
+    const totalCount = job.total_items || (job.items ? job.items.length : 1);
+    const summaryText = `${job.completed_items || 0} of ${totalCount} items detailed`;
+    if (summarySpan.textContent !== summaryText) summarySpan.textContent = summaryText;
+  }
+
+  // Update items in accordion if present
+  if (job.items && job.items.length > 1) {
+    job.items.forEach((item) => {
+      const row = card.querySelector(`.job-item-row[data-item-id="${item.id}"]`);
+      if (row) {
+        const meta = row.querySelector(".job-item-meta");
+        if (meta) {
+          const itemCanResume = ["interrupted", "cancelled", "failed"].includes(item.status);
+          const itemPercent = Math.max(0, Math.min(100, item.percent || 0));
+          meta.innerHTML = `
+            ${item.status === "completed" ? `<span style="color:var(--green); font-weight:700;">${icon("check")} Done</span>` :
+              item.status === "failed" ? `<span style="color:var(--red); font-weight:700;" title="${esc(item.error)}">${icon("alert")} Failed</span>` :
+              item.status === "downloading" ? `<span style="color:var(--accent-text); font-weight:700;">${itemPercent.toFixed(0)}%</span>` :
+              item.status === "interrupted" ? `<span style="color:#D99B00; font-weight:700;">${itemPercent > 0 ? `${itemPercent.toFixed(0)}% (Paused)` : 'Paused'}</span>` :
+              `<span class="muted">${esc(item.status)}</span>`}
+            ${item.filepath ? `<span class="muted">(${esc(baseName(item.filepath))})</span>` : ""}
+            ${itemCanResume ? `<button type="button" class="btn micro primary" data-action="resume-item" data-job="${job.id}" data-item="${item.id}" title="Resume this item from partial progress">${icon("play")} Resume</button>` : ""}
+          `;
+        }
+      }
+    });
+  }
 }
 
 function renderJobs() {
@@ -762,7 +943,45 @@ function renderJobs() {
     jobs = jobs.filter((j) => (j.title || "").toLowerCase().includes(q) || j.id.includes(q));
   }
 
-  container.innerHTML = jobs.map(jobCardHTML).join("");
+  const existingCards = new Map();
+  container.querySelectorAll(".job-card[data-job]").forEach((el) => {
+    existingCards.set(el.dataset.job, el);
+  });
+
+  const jobIds = new Set(jobs.map((j) => j.id));
+  existingCards.forEach((card, id) => {
+    if (!jobIds.has(id)) {
+      card.remove();
+    }
+  });
+
+  let previousNode = null;
+  jobs.forEach((job) => {
+    let card = existingCards.get(job.id);
+    if (!card) {
+      const temp = document.createElement("div");
+      temp.innerHTML = jobCardHTML(job).trim();
+      card = temp.firstElementChild;
+      if (previousNode) {
+        previousNode.after(card);
+      } else {
+        container.prepend(card);
+      }
+    } else {
+      patchJobCard(card, job);
+      if (previousNode) {
+        if (previousNode.nextElementSibling !== card) {
+          previousNode.after(card);
+        }
+      } else {
+        if (container.firstElementChild !== card) {
+          container.prepend(card);
+        }
+      }
+    }
+    previousNode = card;
+  });
+
   $("#empty")?.classList.toggle("hidden", jobs.length > 0);
   updateQueueMeta();
 }
@@ -770,6 +989,7 @@ function renderJobs() {
 function updateQueueMeta() {
   const allJobs = Array.from(state.jobs.values());
   const active = allJobs.filter((j) => ["queued", "running", "downloading", "processing"].includes(j.status)).length;
+  const resumable = allJobs.filter((j) => ["interrupted", "failed", "cancelled", "partial"].includes(j.status)).length;
 
   const countBadge = $("#queue-count");
   if (countBadge) countBadge.textContent = String(allJobs.length);
@@ -780,6 +1000,11 @@ function updateQueueMeta() {
   const clearBtn = $("#clear-finished");
   if (clearBtn) {
     clearBtn.disabled = !allJobs.some((j) => ["completed", "failed", "cancelled"].includes(j.status));
+  }
+
+  const resumeAllBtn = $("#resume-all-btn");
+  if (resumeAllBtn) {
+    resumeAllBtn.disabled = resumable === 0;
   }
 }
 
@@ -804,19 +1029,40 @@ function updateOverviewWidgets() {
   if (activeJob && spotlightSection && spotlightBody) {
     spotlightSection.classList.remove("hidden");
     const percent = Math.max(0, Math.min(100, activeJob.percent || 0));
-    spotlightBody.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-        <h4 style="font-family:var(--font-heading); font-size:16px; font-weight:800;">${esc(activeJob.title || "Active Download")}</h4>
-        <span style="font-family:var(--font-mono); font-size:13px; font-weight:700;">${percent.toFixed(0)}%</span>
-      </div>
-      <div class="job-progress-bar" style="margin-bottom:10px;">
-        <div class="job-progress-fill" style="width:${percent}%;"></div>
-      </div>
-      <div style="display:flex; justify-content:space-between; font-size:12.5px; color:var(--text-secondary); font-family:var(--font-mono);">
-        <span>${bytes(activeJob.speed)}/s · ETA ${duration(activeJob.eta)}</span>
-        <span>${bytes(activeJob.downloaded)} of ${bytes(activeJob.total_bytes)}</span>
-      </div>`;
+    const smoothedSpd = getSmoothedSpeed(activeJob);
+    const activeJobId = activeJob.id;
+    const isSameJob = spotlightBody.dataset.jobId === activeJobId;
+    spotlightBody.dataset.jobId = activeJobId;
+
+    const existingFill = spotlightBody.querySelector(".job-progress-fill");
+    if (existingFill && isSameJob) {
+      existingFill.style.width = `${percent}%`;
+      const titleEl = spotlightBody.querySelector("h4");
+      const pctEl = spotlightBody.querySelector("[data-spotlight-pct]");
+      const speedEl = spotlightBody.querySelector("[data-spotlight-speed]");
+      const bytesEl = spotlightBody.querySelector("[data-spotlight-bytes]");
+      if (titleEl && titleEl.textContent !== (activeJob.title || "Active Download")) {
+        titleEl.textContent = activeJob.title || "Active Download";
+      }
+      if (pctEl) pctEl.textContent = `${percent.toFixed(0)}%`;
+      if (speedEl) speedEl.textContent = `${bytes(smoothedSpd)}/s · ETA ${duration(activeJob.eta)}`;
+      if (bytesEl) bytesEl.textContent = `${bytes(activeJob.downloaded)} of ${bytes(activeJob.total_bytes)}`;
+    } else {
+      spotlightBody.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h4 style="font-family:var(--font-heading); font-size:16px; font-weight:800;">${esc(activeJob.title || "Active Download")}</h4>
+          <span data-spotlight-pct style="font-family:var(--font-mono); font-size:13px; font-weight:700;">${percent.toFixed(0)}%</span>
+        </div>
+        <div class="job-progress-bar" style="margin-bottom:10px;">
+          <div class="job-progress-fill is-active" style="width:${percent}%;"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:12.5px; color:var(--text-secondary); font-family:var(--font-mono); font-variant-numeric:tabular-nums;">
+          <span data-spotlight-speed>${bytes(smoothedSpd)}/s · ETA ${duration(activeJob.eta)}</span>
+          <span data-spotlight-bytes>${bytes(activeJob.downloaded)} of ${bytes(activeJob.total_bytes)}</span>
+        </div>`;
+    }
   } else if (spotlightSection) {
+    if (spotlightBody) delete spotlightBody.dataset.jobId;
     spotlightSection.classList.add("hidden");
   }
 
@@ -1008,9 +1254,16 @@ async function handleJobAction(event) {
       if (!confirmed) return;
       await api(`/api/jobs/${jobId}/cancel`, { method: "POST" });
       toast("Cancellation requested", "warn");
+    } else if (action === "resume") {
+      await api(`/api/jobs/${jobId}/resume`, { method: "POST" });
+      toast("Resuming download from partial progress…", "ok");
+    } else if (action === "resume-item") {
+      const itemId = target.dataset.item;
+      await api(`/api/jobs/${jobId}/items/${itemId}/resume`, { method: "POST" });
+      toast("Resuming item from partial progress…", "ok");
     } else if (action === "retry") {
       await api(`/api/jobs/${jobId}/retry`, { method: "POST" });
-      toast("Retrying download…", "ok");
+      toast("Restarting download…", "ok");
     } else if (action === "open") {
       await api(`/api/jobs/${jobId}/open`, { method: "POST" });
     } else if (action === "delete") {
@@ -1378,6 +1631,26 @@ function bindEvents() {
   $("#audioOnly")?.addEventListener("change", syncAudioUI);
   $("#cookieUpload")?.addEventListener("change", (e) => uploadCookies(e.target.files[0]));
   $("#clear-finished")?.addEventListener("click", clearFinished);
+  $("#pref-resume-partial")?.addEventListener("change", (e) => {
+    const resumeEl = $("#resume");
+    if (resumeEl) resumeEl.checked = e.target.checked;
+    savePrefs();
+  });
+  $("#resume")?.addEventListener("change", (e) => {
+    const prefEl = $("#pref-resume-partial");
+    if (prefEl) prefEl.checked = e.target.checked;
+    savePrefs();
+  });
+  $("#resume-all-btn")?.addEventListener("click", async () => {
+    try {
+      const res = await api("/api/jobs/resume-all", { method: "POST" });
+      const count = res.resumed || 0;
+      toast(count > 0 ? `Resumed ${count} download(s)` : "No unfinished downloads to resume", "ok");
+      setTimeout(syncJobs, 250);
+    } catch (e) {
+      toast("Could not resume downloads: " + e.message, "err");
+    }
+  });
 
   $("#form")?.addEventListener("input", savePrefs);
   $("#form")?.addEventListener("change", savePrefs);

@@ -618,6 +618,20 @@ kbd {
   box-shadow: 2px 2px 0px var(--border);
 }
 
+.btn.micro {
+  min-height: 26px;
+  padding: 0 9px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+  box-shadow: 1.5px 1.5px 0px var(--border);
+  gap: 4px;
+}
+
+.btn.micro svg {
+  width: 12px;
+  height: 12px;
+}
+
 .btn.danger {
   border-color: var(--red);
   color: var(--red);
@@ -1649,6 +1663,45 @@ kbd {
 .status-badge.running, .status-badge.downloading {
   background: var(--accent);
   color: #191A23;
+  position: relative;
+}
+
+.status-badge.running::before, .status-badge.downloading::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #191A23;
+  animation: badge-live-pulse 1.4s cubic-bezier(0.2, 0.8, 0.4, 1) infinite;
+}
+
+.status-badge.processing {
+  background: #FFD233;
+  color: #191A23;
+  position: relative;
+}
+
+.status-badge.processing::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #191A23;
+  animation: badge-live-pulse 1.0s cubic-bezier(0.2, 0.8, 0.4, 1) infinite;
+}
+
+.status-badge.interrupted, .status-badge.partial {
+  background: #FFB800;
+  color: #191A23;
+  border-color: #D99B00;
+}
+
+.status-badge.cancelled {
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+  border: 1px dashed var(--border);
 }
 
 .status-badge.completed {
@@ -1661,41 +1714,109 @@ kbd {
   color: #FFFFFF;
 }
 
+@keyframes badge-live-pulse {
+  0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(25, 26, 35, 0.6); }
+  60% { transform: scale(1.2); box-shadow: 0 0 0 5px rgba(25, 26, 35, 0); }
+  100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(25, 26, 35, 0); }
+}
+
+.job-card.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--accent), var(--shadow-card);
+}
+
 .job-progress-wrapper {
   margin: 14px 0 10px 0;
 }
 
 .job-progress-bar {
-  height: 12px;
+  height: 14px;
   background: var(--surface-alt);
-  border: 1.5px solid var(--border);
+  border: 2px solid var(--border);
   border-radius: var(--radius-full);
   overflow: hidden;
   position: relative;
+  box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .job-progress-fill {
   height: 100%;
   background: var(--accent);
-  border-right: 1.5px solid var(--border);
-  transition: width 0.3s var(--ease);
+  border-right: 2px solid var(--border);
+  transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  overflow: hidden;
 }
 
-.job-progress-fill.indeterminate {
-  width: 100%;
-  background: repeating-linear-gradient(
-    45deg,
+.job-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -80px;
+  width: 80px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  pointer-events: none;
+}
+
+.job-progress-fill.is-active::after,
+.job-progress-fill.active::after,
+.job-progress-fill.processing::after {
+  animation: progress-shimmer 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes progress-shimmer {
+  0% { left: -80px; }
+  60%, 100% { left: 100%; }
+}
+
+.job-progress-fill.is-active,
+.job-progress-fill.active {
+  background-image: repeating-linear-gradient(
+    -45deg,
     var(--accent),
     var(--accent) 12px,
     var(--accent-hover) 12px,
     var(--accent-hover) 24px
   );
-  animation: move-stripes 1.5s linear infinite;
+  background-size: 33.94px 100%;
+  animation: move-stripes 1.2s linear infinite;
+}
+
+.job-progress-fill.processing {
+  background-color: #FFD233;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    #FFD233,
+    #FFD233 12px,
+    #E5BC2E 12px,
+    #E5BC2E 24px
+  );
+  background-size: 33.94px 100%;
+  animation: move-stripes 1.0s linear infinite;
+}
+
+.job-progress-fill.completed {
+  background: var(--green);
+  border-right: none;
+}
+
+.job-progress-fill.indeterminate {
+  width: 100% !important;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--accent),
+    var(--accent) 12px,
+    var(--accent-hover) 12px,
+    var(--accent-hover) 24px
+  );
+  background-size: 33.94px 100%;
+  animation: move-stripes 1.2s linear infinite;
 }
 
 @keyframes move-stripes {
   from { background-position: 0 0; }
-  to { background-position: 48px 0; }
+  to { background-position: 33.94px 0; }
 }
 
 .job-meta-row {
@@ -1705,6 +1826,7 @@ kbd {
   font-size: 12.5px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .job-actions {

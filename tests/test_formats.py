@@ -86,6 +86,29 @@ def test_aria2_arguments(settings, monkeypatch):
     assert any(arg.startswith("-x") for arg in args)
 
 
+def test_resume_download_params(settings, monkeypatch):
+    settings.use_aria2 = True
+    monkeypatch.setattr(youtube, "aria2_path", lambda: "C:/tools/aria2c.exe")
+
+    # Default is resume=True
+    params = build_download_params(DownloadOptions(), settings)
+    assert params["continuedl"] is True
+    assert params["nopart"] is False
+    assert params["overwrites"] is False
+    assert "-c" in params["external_downloader_args"]["default"]
+    assert "--auto-file-renaming=false" in params["external_downloader_args"]["default"]
+    assert "--allow-overwrite=true" in params["external_downloader_args"]["default"]
+
+    # When resume is disabled
+    params_no_resume = build_download_params(DownloadOptions(resume=False), settings)
+    assert params_no_resume["continuedl"] is False
+    assert params_no_resume["nopart"] is True
+    assert params_no_resume["overwrites"] is True
+    assert "-c" not in params_no_resume["external_downloader_args"]["default"]
+    assert "--allow-overwrite=true" in params_no_resume["external_downloader_args"]["default"]
+    assert "--remove-control-file=true" in params_no_resume["external_downloader_args"]["default"]
+
+
 def test_rate_limit_and_cookies(settings, tmp_path):
     cookie = tmp_path / "cookies.txt"
     cookie.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")

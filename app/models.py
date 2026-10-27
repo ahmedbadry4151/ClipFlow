@@ -49,6 +49,9 @@ class DownloadOptions(BaseModel):
     fragments: int | None = Field(default=None, ge=1, le=64)
     retries: int | None = Field(default=None, ge=0, le=20)
     output_template: str = ""
+    resume: bool = True
+    continuedl: bool = True
+    nopart: bool = False
 
     @field_validator("playlist_items", "subtitle_langs", "cookies_file", "proxy", "rate_limit", "section", "output_template")
     @classmethod

@@ -245,6 +245,21 @@ async def retry_job(job_id: str, request: Request) -> dict[str, Any]:
     return {"retried": count}
 
 
+@router.post("/jobs/{job_id}/resume")
+async def resume_job(job_id: str, request: Request) -> dict[str, Any]:
+    try:
+        count = _manager(request).resume_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
+    return {"resumed": count}
+
+
+@router.post("/jobs/resume-all")
+async def resume_all_jobs(request: Request) -> dict[str, Any]:
+    count = _manager(request).resume_all()
+    return {"resumed": count}
+
+
 @router.delete("/jobs/{job_id}")
 async def delete_job(
     job_id: str,
@@ -276,6 +291,15 @@ async def retry_item(job_id: str, item_id: str, request: Request) -> dict[str, A
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"retried": retried}
+
+
+@router.post("/jobs/{job_id}/items/{item_id}/resume")
+async def resume_item(job_id: str, item_id: str, request: Request) -> dict[str, Any]:
+    try:
+        retried = _manager(request).resume_item(job_id, item_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"resumed": retried}
 
 
 @router.post("/jobs/{job_id}/open")
@@ -487,12 +511,12 @@ async def clean_temp_files(request: Request) -> dict[str, Any]:
     if not download_dir.exists():
         return {"cleaned": 0, "bytes_freed": 0}
 
-    temp_suffixes = {".part", ".ytdl", ".temp"}
+    temp_suffixes = (".part", ".ytdl", ".temp", ".aria2")
     cleaned_count = 0
     bytes_freed = 0
     try:
         for item in download_dir.iterdir():
-            if item.is_file() and item.suffix.lower() in temp_suffixes:
+            if item.is_file() and item.name.lower().endswith(temp_suffixes):
                 size = item.stat().st_size
                 item.unlink()
                 cleaned_count += 1

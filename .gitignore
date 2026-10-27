@@ -30,3 +30,8 @@ graphify-out/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Agent / Tooling
+.gemini/
+GEMINI.md
+docs/*REPORT*.md

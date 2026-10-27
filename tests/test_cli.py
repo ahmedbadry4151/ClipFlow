@@ -67,3 +67,30 @@ def test_version_flag():
 def test_serve_parser_open_flag():
     args = build_parser().parse_args(["serve", "--open"])
     assert args.open is True
+
+
+def test_parser_resume_flags():
+    args = build_parser().parse_args(["download", "https://youtu.be/abc"])
+    options = _options_from_args(args)
+    assert options.resume is True
+
+    args_no_resume = build_parser().parse_args(["download", "https://youtu.be/abc", "--no-resume"])
+    options_no_resume = _options_from_args(args_no_resume)
+    assert options_no_resume.resume is False
+
+
+def test_resume_command_help():
+    args = build_parser().parse_args(["resume", "job123"])
+    assert args.command == "resume"
+    assert args.job_id == "job123"
+
+
+def test_cmd_resume_empty_queue(tmp_path, monkeypatch):
+    monkeypatch.setenv("TURBOTUBE_DATA_PATH", str(tmp_path))
+    assert main(["resume"]) == 0
+
+
+def test_cmd_resume_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("TURBOTUBE_DATA_PATH", str(tmp_path))
+    assert main(["resume", "missing_job_id"]) == 1
+

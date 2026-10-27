@@ -22,6 +22,11 @@ from app.api import (
     list_cookies,
     list_jobs,
     probe,
+    resume_all_jobs,
+    resume_item,
+    resume_job,
+    retry_item,
+    retry_job,
     shutdown_probe_pool,
     system_info,
     upload_cookies,
@@ -219,6 +224,42 @@ class DirectClient:
                 return DirectResponse(200, data)
             except HTTPException as e:
                 return DirectResponse(e.status_code, text=str(e.detail))
+        elif "/items/" in path and path.endswith("/resume"):
+            parts = path.removeprefix("/api/jobs/").removesuffix("/resume").split("/items/")
+            job_id, item_id = parts[0], parts[1]
+            try:
+                data = run_coro(resume_item(job_id, item_id, req))
+                return DirectResponse(200, data)
+            except HTTPException as e:
+                return DirectResponse(e.status_code, text=str(e.detail))
+        elif "/items/" in path and path.endswith("/retry"):
+            parts = path.removeprefix("/api/jobs/").removesuffix("/retry").split("/items/")
+            job_id, item_id = parts[0], parts[1]
+            try:
+                data = run_coro(retry_item(job_id, item_id, req))
+                return DirectResponse(200, data)
+            except HTTPException as e:
+                return DirectResponse(e.status_code, text=str(e.detail))
+        elif path.startswith("/api/jobs/") and path.endswith("/retry"):
+            job_id = path.removeprefix("/api/jobs/").removesuffix("/retry")
+            try:
+                data = run_coro(retry_job(job_id, req))
+                return DirectResponse(200, data)
+            except HTTPException as e:
+                return DirectResponse(e.status_code, text=str(e.detail))
+        elif path.startswith("/api/jobs/") and path.endswith("/resume"):
+            job_id = path.removeprefix("/api/jobs/").removesuffix("/resume")
+            try:
+                data = run_coro(resume_job(job_id, req))
+                return DirectResponse(200, data)
+            except HTTPException as e:
+                return DirectResponse(e.status_code, text=str(e.detail))
+        elif path == "/api/jobs/resume-all":
+            try:
+                data = run_coro(resume_all_jobs(req))
+                return DirectResponse(200, data)
+            except HTTPException as e:
+                return DirectResponse(e.status_code, text=str(e.detail))
         elif path == "/api/cookies":
             try:
                 file_tuple = files.get("file")
@@ -381,3 +422,65 @@ def test_missing_cookie_file_rejected(settings, monkeypatch):
             json={"url": VIDEO, "options": {"cookies_file": "does-not-exist.txt"}},
         )
         assert response.status_code == 400
+
+
+def test_resume_api_endpoints(settings, monkeypatch):
+    monkeypatch.setattr(
+        manager_module,
+        "expand_playlist",
+        lambda *args, **kwargs: [
+            {"url": VIDEO, "title": "Resume API Video", "index": 1, "duration": 30}
+        ],
+    )
+    should_fail = True
+
+    def flake_run(url, options, settings_arg, **kwargs):
+        if should_fail:
+            raise RuntimeError("Unsupported URL: test error")
+        path = settings_arg.download_path / "flake.mp4"
+        path.write_bytes(b"content")
+        return {"id": "flake", "filepath": str(path)}
+
+    monkeypatch.setattr(manager_module, "run_download", flake_run)
+
+    with TestClient(settings) as client:
+        # Create job
+        res = client.post("/api/jobs", json={"url": VIDEO})
+        assert res.status_code == 201
+        job_id = res.json()["id"]
+
+        # Wait for failure
+        state = None
+        for _ in range(100):
+            state = client.get(f"/api/jobs/{job_id}").json()
+            if state["status"] == "failed":
+                break
+            time.sleep(0.05)
+        assert state["status"] == "failed"
+        item_id = state["items"][0]["id"]
+
+        # Now allow download to succeed
+        should_fail = False
+
+        # Test POST /api/jobs/{job_id}/items/{item_id}/resume
+        res_item = client.post(f"/api/jobs/{job_id}/items/{item_id}/resume")
+        assert res_item.status_code == 200
+        assert res_item.json().get("resumed") is True
+
+        # Wait for complete
+        for _ in range(100):
+            state = client.get(f"/api/jobs/{job_id}").json()
+            if state["status"] == "completed":
+                break
+            time.sleep(0.05)
+        assert state["status"] == "completed"
+
+        # Test POST /api/jobs/{job_id}/resume on completed job
+        res_job = client.post(f"/api/jobs/{job_id}/resume")
+        assert res_job.status_code == 200
+        assert res_job.json().get("resumed") == 0
+
+        # Test POST /api/jobs/resume-all
+        res_all = client.post("/api/jobs/resume-all")
+        assert res_all.status_code == 200
+        assert "resumed" in res_all.json()

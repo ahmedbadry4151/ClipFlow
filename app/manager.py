@@ -42,6 +42,7 @@ _ARTIFACT_SUFFIXES = {
     ".description",
     ".part",
     ".ytdl",
+    ".aria2",
 }
 
 _FATAL_MARKERS = (
@@ -231,6 +232,7 @@ class JobState:
         completed = sum(1 for item in self.items if item.status == "completed")
         failed = sum(1 for item in self.items if item.status == "failed")
         cancelled = sum(1 for item in self.items if item.status == "cancelled")
+        interrupted = sum(1 for item in self.items if item.status == "interrupted")
         active = sum(1 for item in self.items if item.status in ACTIVE)
 
         total_bytes = sum(item.total for item in self.items)
@@ -262,6 +264,7 @@ class JobState:
             "completed_items": completed,
             "failed_items": failed,
             "cancelled_items": cancelled,
+            "interrupted_items": interrupted,
             "active_items": active,
             "percent": round(min(100.0, percent), 1),
             "downloaded": downloaded,
@@ -744,6 +747,8 @@ class JobManager:
             status = "failed"
         elif statuses and all(status == "cancelled" for status in statuses):
             status = "cancelled"
+        elif statuses and all(status == "interrupted" for status in statuses):
+            status = "interrupted"
         else:
             status = "partial"
         with self._lock:
@@ -848,14 +853,14 @@ class JobManager:
             return
         raise KeyError(item_id)
 
-    def retry_job(self, job_id: str) -> int:
+    def retry_job(self, job_id: str, *, preserve_progress: bool = False) -> int:
         job = self._jobs.get(job_id)
         if not job:
             raise KeyError(job_id)
         resubmitted = 0
         for item in job.items:
             if item.status in {"failed", "cancelled", "interrupted"}:
-                self._reset_item(item)
+                self._reset_item(item, preserve_progress=preserve_progress)
                 self._submit(item)
                 resubmitted += 1
         if resubmitted:
@@ -863,7 +868,7 @@ class JobManager:
             self._recompute_status(job)
         return resubmitted
 
-    def retry_item(self, job_id: str, item_id: str) -> bool:
+    def retry_item(self, job_id: str, item_id: str, *, preserve_progress: bool = False) -> bool:
         job = self._jobs.get(job_id)
         if not job:
             raise KeyError(job_id)
@@ -871,21 +876,38 @@ class JobManager:
             if item.id == item_id:
                 if item.status not in {"failed", "cancelled", "interrupted"}:
                     return False
-                self._reset_item(item)
+                self._reset_item(item, preserve_progress=preserve_progress)
                 self._submit(item)
                 self._recompute_status(job)
                 return True
         raise KeyError(item_id)
 
-    def _reset_item(self, item: ItemState) -> None:
+    def resume_job(self, job_id: str) -> int:
+        """Resume a partially completed or interrupted job from where it stopped."""
+        return self.retry_job(job_id, preserve_progress=True)
+
+    def resume_item(self, job_id: str, item_id: str) -> bool:
+        """Resume a specific item from where it stopped."""
+        return self.retry_item(job_id, item_id, preserve_progress=True)
+
+    def resume_all(self) -> int:
+        """Resume all interrupted, cancelled, or failed jobs across the system."""
+        count = 0
+        for job in list(self._jobs.values()):
+            if any(item.status in {"failed", "cancelled", "interrupted"} for item in job.items):
+                count += self.resume_job(job.id)
+        return count
+
+    def _reset_item(self, item: ItemState, *, preserve_progress: bool = True) -> None:
         with self._lock:
             item.cancel.clear()
             item.status = "queued"
-            item.percent = 0.0
+            if not preserve_progress:
+                item.percent = 0.0
+                item.downloaded = 0
+                item.total = 0
             item.speed = 0.0
             item.eta = None
-            item.downloaded = 0
-            item.total = 0
             item.error = ""
             item.attempts = 0
             item.streams.clear()
@@ -901,25 +923,48 @@ class JobManager:
             raise ValueError("Cancel the job before deleting it")
         deleted: list[str] = []
         if delete_files:
+            download_dir = self.settings.download_path
             for item in job.items:
-                if not item.filepath:
-                    continue
-                try:
-                    path = ensure_within(self.settings.download_path, Path(item.filepath))
-                except UnsafeURLError:
-                    continue
-                if path.is_file():
+                targets: set[Path] = set()
+                if item.filepath:
                     try:
-                        path.unlink()
-                        deleted.append(str(path))
-                    except OSError:
-                        continue
-                for suffix in _ARTIFACT_SUFFIXES:
-                    artifact = path.with_suffix(suffix)
-                    if artifact.is_file():
+                        p = ensure_within(download_dir, Path(item.filepath))
+                        targets.add(p)
+                    except UnsafeURLError:
+                        pass
+
+                expanded: set[Path] = set(targets)
+                for p in targets:
+                    for suffix in _ARTIFACT_SUFFIXES:
+                        expanded.add(p.with_suffix(suffix))
+                        expanded.add(p.parent / f"{p.name}{suffix}")
+                        expanded.add(p.parent / f"{p.name}.part{suffix}")
+
+                if download_dir.exists():
+                    search_tokens: list[str] = []
+                    if item.id:
+                        search_tokens.append(item.id)
+                    if "v=" in item.url:
+                        vid = item.url.split("v=")[1].split("&")[0]
+                        if vid:
+                            search_tokens.append(vid)
+                    elif "youtu.be/" in item.url:
+                        vid = item.url.split("youtu.be/")[1].split("?")[0]
+                        if vid:
+                            search_tokens.append(vid)
+
+                    for entry in download_dir.iterdir():
+                        if entry.is_file():
+                            name_lower = entry.name.lower()
+                            if any(name_lower.endswith(s) for s in _ARTIFACT_SUFFIXES | {".part.aria2"}):
+                                if any(tok in entry.name for tok in search_tokens):
+                                    expanded.add(entry)
+
+                for path in expanded:
+                    if path.is_file():
                         try:
-                            artifact.unlink()
-                            deleted.append(str(artifact))
+                            path.unlink()
+                            deleted.append(str(path))
                         except OSError:
                             pass
         with self._lock:

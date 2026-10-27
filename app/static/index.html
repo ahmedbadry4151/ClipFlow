@@ -17,6 +17,7 @@
     <symbol id="i-paste" viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="4" rx="1.5"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="M8 12h8"/><path d="M8 16h5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12"/><path d="m18 6-12 12"/></symbol>
     <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 4 19 12 6 20 6 4"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v5"/><path d="M14 11v5"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></symbol>
@@ -286,6 +287,9 @@
                     <div class="adv-section">
                       <h3><svg><use href="#i-wifi"/></svg>Network &amp; Acceleration</h3>
                       <div class="adv-grid">
+                        <label class="switch adv-switch" title="Resume partially downloaded files from where they stopped">
+                          <input type="checkbox" id="resume" checked><span class="track"></span><span>Resume partial files (.part)</span>
+                        </label>
                         <label class="switch adv-switch">
                           <input type="checkbox" id="useAria2" checked><span class="track"></span><span>aria2c acceleration</span>
                         </label>
@@ -442,6 +446,9 @@
               <p class="page-desc">Real-time progress streamed directly from download workers.</p>
             </div>
             <div class="queue-header-actions">
+              <button type="button" id="resume-all-btn" class="btn secondary" title="Resume all stopped or interrupted downloads">
+                <svg><use href="#i-play"/></svg><span>Resume All</span>
+              </button>
               <button type="button" id="clear-finished" class="btn secondary" title="Remove finished jobs from the queue (files stay on disk)">
                 <svg><use href="#i-check"/></svg><span>Clear Finished</span>
               </button>
@@ -688,6 +695,16 @@
                   <input type="checkbox" id="pref-auto-clear-finished">
                   <span class="track"></span>
                   <span class="switch-text">Auto-clear completed records on app start</span>
+                </label>
+                <label class="switch">
+                  <input type="checkbox" id="pref-resume-partial" checked>
+                  <span class="track"></span>
+                  <span class="switch-text">Resume partial downloads from where they stopped</span>
+                </label>
+                <label class="switch">
+                  <input type="checkbox" id="pref-auto-resume">
+                  <span class="track"></span>
+                  <span class="switch-text">Auto-resume interrupted downloads on server start</span>
                 </label>
               </div>
             </div>

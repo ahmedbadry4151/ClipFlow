@@ -177,3 +177,177 @@ def test_active_job_cannot_be_deleted(manager, monkeypatch):
         manager.delete_job(job.id)
     manager.cancel_job(job.id)
     assert wait_for(lambda: manager.get_job(job.id).status == "cancelled", timeout=6)
+
+
+def test_resume_job_preserves_progress(manager, monkeypatch):
+    cancelled_once = False
+
+    def partial_then_cancel(url, options, settings, **kwargs):
+        nonlocal cancelled_once
+        hook = kwargs.get("progress_hook")
+        if not cancelled_once:
+            cancelled_once = True
+            if hook:
+                hook({
+                    "status": "downloading",
+                    "downloaded_bytes": 500,
+                    "total_bytes": 1000,
+                    "speed": 50,
+                    "info_dict": {"format_id": "v"},
+                })
+            raise DownloadCancelled("Stopped midway")
+        if hook:
+            hook({
+                "status": "downloading",
+                "downloaded_bytes": 1000,
+                "total_bytes": 1000,
+                "speed": 100,
+                "info_dict": {"format_id": "v"},
+            })
+            hook({
+                "status": "finished",
+                "downloaded_bytes": 1000,
+                "total_bytes": 1000,
+                "info_dict": {"format_id": "v"},
+            })
+        path = settings.download_path / "resume1.mp4"
+        path.write_bytes(b"data")
+        return {"id": "resume1", "filepath": str(path)}
+
+    monkeypatch.setattr(manager_module, "run_download", partial_then_cancel)
+    job = manager.create_job(VIDEO, DownloadOptions(), entries=[_entry("resume1")])
+    assert wait_for(lambda: manager.get_job(job.id).status == "cancelled", timeout=10)
+    item = manager.get_job(job.id).items[0]
+    assert item.status == "cancelled"
+    assert item.percent == 50.0
+    assert item.downloaded == 500
+    assert item.total == 1000
+
+    # Resume the job
+    resumed = manager.resume_job(job.id)
+    assert resumed == 1
+
+    # While queued/starting, partial progress must be preserved
+    item_resuming = manager.get_job(job.id).items[0]
+    assert item_resuming.percent == 50.0
+    assert item_resuming.downloaded == 500
+
+    assert wait_for(lambda: manager.get_job(job.id).status == "completed", timeout=10)
+    final_item = manager.get_job(job.id).items[0]
+    assert final_item.status == "completed"
+    assert final_item.percent == 100.0
+
+
+def test_resume_all_and_resume_item(manager, monkeypatch):
+    def fail(url, options, settings, **kwargs):
+        raise RuntimeError("Network drop")
+
+    monkeypatch.setattr(manager_module, "run_download", fail)
+    job = manager.create_job(VIDEO, DownloadOptions(), entries=[_entry("fail_res")])
+    assert wait_for(lambda: manager.get_job(job.id).status == "failed", timeout=10)
+
+    # test resume_item
+    item_id = manager.get_job(job.id).items[0].id
+    assert manager.resume_item(job.id, item_id) is True
+    assert wait_for(lambda: manager.get_job(job.id).status == "failed", timeout=10)
+
+    # now with working download, resume_all
+    working, _ = _fake_run()
+    monkeypatch.setattr(manager_module, "run_download", working)
+    count = manager.resume_all()
+    assert count >= 1
+    assert wait_for(lambda: manager.get_job(job.id).status == "completed", timeout=10)
+
+
+def test_retry_resets_progress_while_resume_preserves(manager, monkeypatch):
+    def fail_with_progress(url, options, settings, **kwargs):
+        hook = kwargs.get("progress_hook")
+        if hook:
+            hook({
+                "status": "downloading",
+                "downloaded_bytes": 400,
+                "total_bytes": 1000,
+                "info_dict": {"format_id": "v"},
+            })
+        raise RuntimeError("simulated error")
+
+    monkeypatch.setattr(manager_module, "run_download", fail_with_progress)
+    job = manager.create_job(VIDEO, DownloadOptions(), entries=[_entry("progress_test")])
+    assert wait_for(lambda: manager.get_job(job.id).status == "failed", timeout=10)
+    assert manager.get_job(job.id).items[0].percent == 40.0
+
+    # retry_job with preserve_progress=False should reset to 0
+    manager.retry_job(job.id, preserve_progress=False)
+    item_reset = manager.get_job(job.id).items[0]
+    assert item_reset.percent == 0.0
+    assert item_reset.downloaded == 0
+
+
+def test_delete_job_cleans_partial_artifacts(manager, monkeypatch, tmp_path):
+    job = manager.create_job(VIDEO, DownloadOptions(), entries=[_entry("partial_clean")])
+    item = manager.get_job(job.id).items[0]
+    manager.cancel_job(job.id)
+    assert wait_for(lambda: manager.get_job(job.id).status == "cancelled")
+
+    # Simulate partial files left on disk
+    download_dir = manager.settings.download_path
+    part_file = download_dir / f"{item.id}.mp4.part"
+    aria2_file = download_dir / f"{item.id}.mp4.part.aria2"
+    part_file.write_bytes(b"partial video data")
+    aria2_file.write_bytes(b"aria2 control data")
+
+    assert part_file.exists()
+    assert aria2_file.exists()
+
+    deleted = manager.delete_job(job.id, delete_files=True)
+    assert not part_file.exists()
+    assert not aria2_file.exists()
+    assert any(str(part_file) == d for d in deleted)
+
+
+def test_interrupted_job_status_is_interrupted(settings):
+    import json
+    store = Store(settings.data_path / "interrupted.db")
+    now = time.time()
+    store.save_job({
+        "id": "job_int",
+        "url": "https://example.com/watch?v=abc123",
+        "title": "Interrupted Video",
+        "kind": "video",
+        "status": "running",
+        "created_at": now,
+        "updated_at": now,
+        "error": "",
+        "total_items": 1,
+        "options": json.dumps({}),
+    })
+    store.save_items([{
+        "id": "item_int",
+        "job_id": "job_int",
+        "idx": 1,
+        "url": "https://example.com/watch?v=abc123",
+        "title": "Interrupted Video",
+        "duration": None,
+        "status": "downloading",
+        "percent": 45.0,
+        "speed": 0.0,
+        "eta": None,
+        "downloaded": 4500,
+        "total": 10000,
+        "filepath": "",
+        "error": "",
+        "attempts": 1,
+        "created_at": now,
+        "updated_at": now,
+    }])
+
+    manager = JobManager(settings, store, EventBus())
+    job = manager.get_job("job_int")
+    assert job is not None
+    assert job.status == "interrupted"
+    assert job.items[0].status == "interrupted"
+    assert job.items[0].percent == 45.0
+    assert job.summary()["interrupted_items"] == 1
+    manager.shutdown()
+    store.close()
+

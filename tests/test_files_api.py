@@ -118,14 +118,17 @@ def test_clean_temp_files(settings):
     part_file.write_bytes(b"temp123")
     ytdl_file = settings.download_path / "audio.m4a.ytdl"
     ytdl_file.write_bytes(b"temp4567")
+    aria2_file = settings.download_path / "video.mp4.part.aria2"
+    aria2_file.write_bytes(b"ctrl89")
     normal_file = settings.download_path / "completed.mp4"
     normal_file.write_bytes(b"final")
 
     result = run_coro(clean_temp_files(req))
-    assert result["cleaned"] == 2
-    assert result["bytes_freed"] == len(b"temp123") + len(b"temp4567")
+    assert result["cleaned"] == 3
+    assert result["bytes_freed"] == len(b"temp123") + len(b"temp4567") + len(b"ctrl89")
     assert not part_file.exists()
     assert not ytdl_file.exists()
+    assert not aria2_file.exists()
     assert normal_file.exists()
 
 

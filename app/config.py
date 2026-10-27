@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     max_history: int = Field(default=200, ge=1, le=5000)
     enable_open_folder: bool = True
     auto_resume: bool = False
+    resume_downloads: bool = True
     allowed_hosts: str = ""
     allow_private_hosts: bool = False
     rate_limit_rpm: int = Field(default=0, ge=0, le=1000)

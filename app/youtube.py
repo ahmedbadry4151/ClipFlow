@@ -262,26 +262,45 @@ def build_download_params(
             }
         )
 
+    # Resume / partial download controls
+    resume = (
+        getattr(settings, "resume_downloads", True)
+        if getattr(options, "resume", None) is None
+        else options.resume
+    )
+    if not getattr(options, "continuedl", True):
+        resume = False
+    if getattr(options, "nopart", False):
+        resume = False
+
+    params["continuedl"] = resume
+    params["nopart"] = not resume
+    params["overwrites"] = not resume
+
     if aria2:
+        aria2_args = [
+            "--no-conf",
+            f"-x{settings.aria2_connections}",
+            f"-s{settings.aria2_connections}",
+            "-k1M",
+            "-j1",
+            "--min-split-size=1M",
+            "--file-allocation=none",
+            "--console-log-level=warn",
+            "--summary-interval=0",
+            "--download-result=hide",
+            "--connect-timeout=15",
+            "--timeout=45",
+            "--max-tries=5",
+            "--retry-wait=1",
+        ]
+        if resume:
+            aria2_args.extend(["-c", "--auto-file-renaming=false", "--allow-overwrite=true"])
+        else:
+            aria2_args.extend(["--allow-overwrite=true", "--remove-control-file=true"])
+
         params["external_downloader"] = {"default": aria2}
-        params["external_downloader_args"] = {
-            "default": [
-                "--no-conf",
-                f"-x{settings.aria2_connections}",
-                f"-s{settings.aria2_connections}",
-                "-k1M",
-                "-j1",
-                "--min-split-size=1M",
-                "--file-allocation=none",
-                "--console-log-level=warn",
-                "--summary-interval=0",
-                "--download-result=hide",
-                "--connect-timeout=15",
-                "--timeout=45",
-                "--max-tries=5",
-                "--retry-wait=1",
-            ]
-        }
+        params["external_downloader_args"] = {"default": aria2_args}
 
     if options.rate_limit:
         limit = parse_rate_limit(options.rate_limit)

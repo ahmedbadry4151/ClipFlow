@@ -144,6 +144,7 @@ def _options_from_args(args: argparse.Namespace) -> DownloadOptions:
         archive=args.archive,
         use_aria2=not args.no_aria2,
         fragments=args.fragments,
+        resume=not getattr(args, "no_resume", False),
     )
 
 
@@ -432,6 +433,94 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resume(args: argparse.Namespace) -> int:
+    from .events import EventBus
+    from .manager import ACTIVE, JobManager
+    from .store import Store
+
+    settings = _build_settings(args)
+    store = Store(settings.data_path / "turbotube.db")
+    bus = EventBus()
+    manager = JobManager(settings, store, bus)
+    try:
+        if args.job_id:
+            count = manager.resume_job(args.job_id)
+            if count == 0:
+                console.print(f"[yellow]No unfinished items to resume for job {args.job_id}[/]")
+                return 0
+            console.print(f"[green]Resuming {count} item(s) for job {args.job_id}...[/]")
+        else:
+            count = manager.resume_all()
+            if count == 0:
+                console.print("[yellow]No unfinished downloads to resume[/]")
+                return 0
+            console.print(f"[green]Resuming {count} item(s) across unfinished jobs...[/]")
+
+        target_ids = {args.job_id} if args.job_id else set(manager._jobs.keys())
+        with Progress(
+            TextColumn("[progress.description]{task.description}", table_column=None),
+            BarColumn(bar_width=None),
+            TaskProgressColumn(),
+            TextColumn("{task.fields[status]}", style="cyan"),
+            TimeRemainingColumn(),
+            console=console,
+            transient=False,
+        ) as progress:
+            tasks: dict[str, TaskID] = {}
+            for jid in target_ids:
+                job = manager.get_job(jid)
+                if not job:
+                    continue
+                for item in job.items:
+                    if item.status in ACTIVE:
+                        label = (item.title or f"Item {item.index}")[:50]
+                        tasks[item.id] = progress.add_task(
+                            escape(label),
+                            total=100,
+                            completed=item.percent,
+                            status=item.status,
+                        )
+
+            while True:
+                active_remaining = False
+                for jid in target_ids:
+                    job = manager.get_job(jid)
+                    if not job:
+                        continue
+                    for item in job.items:
+                        if item.id in tasks:
+                            tid = tasks[item.id]
+                            st_colour = (
+                                "green"
+                                if item.status == "completed"
+                                else "red"
+                                if item.status == "failed"
+                                else "yellow"
+                                if item.status == "cancelled"
+                                else "cyan"
+                            )
+                            progress.update(
+                                tid,
+                                completed=item.percent,
+                                status=f"[{st_colour}]{item.status}[/]",
+                            )
+                        if item.status in ACTIVE:
+                            active_remaining = True
+                if not active_remaining:
+                    break
+                time.sleep(0.25)
+        return 0
+    except KeyError:
+        console.print(f"[red]Job {args.job_id} not found[/]")
+        return 1
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted by user. Cancelling active downloads...[/]")
+        return 130
+    finally:
+        manager.shutdown()
+        store.close()
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
@@ -489,9 +578,15 @@ def build_parser() -> argparse.ArgumentParser:
     download.add_argument("--chapters", action="store_true")
     download.add_argument("--sponsorblock", default="off", choices=["off", "mark", "remove"])
     download.add_argument("--archive", action="store_true")
+    download.add_argument("--no-resume", dest="no_resume", action="store_true",
+                          help="start from scratch instead of resuming partially completed downloads")
     download.add_argument("--dry-run", action="store_true")
     download.add_argument("--json", action="store_true")
     download.set_defaults(func=cmd_download)
+
+    resume_p = sub.add_parser("resume", help="resume partially completed or interrupted download jobs")
+    resume_p.add_argument("job_id", nargs="?", default="", help="optional specific job ID to resume (resumes all if omitted)")
+    resume_p.set_defaults(func=cmd_resume)
 
     doctor = sub.add_parser("doctor", help="check the local toolchain")
     doctor.set_defaults(func=cmd_doctor)

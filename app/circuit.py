@@ -44,16 +44,19 @@ class CircuitBreaker:
 
     def allow_request(self) -> bool:
         """Return True if the request should proceed."""
-        state = self.state
-        if state == self.CLOSED:
-            return True
-        if state == self.HALF_OPEN:
-            with self._lock:
+        with self._lock:
+            if self._state == self.OPEN:
+                if time.monotonic() - self._opened_at >= self._recovery:
+                    self._state = self.HALF_OPEN
+                    self._half_open_count = 0
+            if self._state == self.CLOSED:
+                return True
+            if self._state == self.HALF_OPEN:
                 if self._half_open_count < self._half_open_max:
                     self._half_open_count += 1
                     return True
-            return False
-        return False  # OPEN
+                return False
+            return False  # OPEN
 
     def record_success(self) -> None:
         with self._lock:

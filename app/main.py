@@ -24,11 +24,19 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def _configure_logging(settings: Settings) -> None:
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
     )
+    root = logging.getLogger()
+    root.setLevel(level)
+    if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
+        root.addHandler(handler)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -56,7 +64,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
-            manager.shutdown()
+            shutdown_future = loop.run_in_executor(None, manager.shutdown)
+            try:
+                await asyncio.wait_for(asyncio.shield(shutdown_future), timeout=10)
+            except asyncio.TimeoutError:
+                log.warning("Shutdown timed out — forcing exit")
             shutdown_probe_pool()
             store.close()
 

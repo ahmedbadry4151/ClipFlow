@@ -1,0 +1,28 @@
+# runtime
+downloads/
+data/
+*.log
+*.part
+*.ytdl
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# tooling output
+graphify-out/
+
+# env / editors
+.env
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -383,7 +383,7 @@ class JobManager:
                         item.cancel.set()
         self._watchdog.stop()
         self._flusher.stop()
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._executor.shutdown(wait=True, cancel_futures=True)
         log.info("Download manager stopped")
 
     def resume_interrupted(self) -> int:
@@ -485,6 +485,13 @@ class JobManager:
         for item in job.items:
             self._submit(item)
         log.info("Created job %s (%s item(s)): %s", job.id, len(job.items), job.title)
+        log.debug(
+            "job_created job_id=%s items=%d kind=%s url=%s",
+            job.id,
+            len(job.items),
+            kind,
+            clean_url[:100],
+        )
         return job
 
     def _trim_memory(self) -> None:
@@ -621,6 +628,13 @@ class JobManager:
                         item.downloaded = size
                     item.updated_at = time.time()
                 self._log_line(item, f"Completed: {item.filepath or item.title}")
+                log.info(
+                    "item_completed item_id=%s job_id=%s attempts=%d bytes=%d",
+                    item.id,
+                    item.job_id,
+                    attempts,
+                    item.total,
+                )
                 break
 
         self._persist_items([item])

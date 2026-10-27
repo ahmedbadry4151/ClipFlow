@@ -1,0 +1,72 @@
+from __future__ import annotations
+import threading
+import time
+import pytest
+from app.ratelimit import RateLimiter
+
+
+def test_ratelimit_allows_up_to_max():
+    limiter = RateLimiter(max_requests=3, window_seconds=0.2)
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is False
+
+
+def test_ratelimit_tracks_per_client():
+    limiter = RateLimiter(max_requests=2, window_seconds=0.2)
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is False
+
+    # ip2 is unaffected
+    assert limiter.allow("ip2") is True
+    assert limiter.allow("ip2") is True
+    assert limiter.allow("ip2") is False
+
+
+def test_ratelimit_sliding_window_expiry():
+    limiter = RateLimiter(max_requests=2, window_seconds=0.08)
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is False
+
+    # Wait for window to expire
+    time.sleep(0.09)
+    assert limiter.allow("ip1") is True
+
+
+def test_ratelimit_reset():
+    limiter = RateLimiter(max_requests=2, window_seconds=10.0)
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is True
+    assert limiter.allow("ip1") is False
+
+    limiter.reset()
+    assert limiter.allow("ip1") is True
+
+
+def test_ratelimit_disabled():
+    limiter = RateLimiter(max_requests=0, window_seconds=10.0)
+    for _ in range(20):
+        assert limiter.allow("ip1") is True
+
+
+def test_ratelimit_concurrency():
+    limiter = RateLimiter(max_requests=50, window_seconds=1.0)
+    allowed_count = 0
+    lock = threading.Lock()
+
+    def hit():
+        nonlocal allowed_count
+        if limiter.allow("shared-ip"):
+            with lock:
+                allowed_count += 1
+
+    threads = [threading.Thread(target=hit) for _ in range(100)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert allowed_count == 50

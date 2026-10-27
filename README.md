@@ -7,15 +7,15 @@ ClipFlow is designed for one thing: saturating your connection while keeping ful
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser (vanilla HTML/CSS/JS)        CLI (rich terminal)   │
-│         │  SSE progress                       │             │
-│         └──────────────┬───────────────────────┘             │
-│                  FastAPI + Uvicorn                           │
-│                        │                                     │
-│              Job manager (thread pool)                       │
-│         ┌──────────────┼──────────────┐                      │
-│      aria2c        yt-dlp core      ffmpeg                   │
-│         └──────────────┴──────────────┘                      │
-│                  SQLite (WAL) + TT_* config                  │
+│         │  SSE progress                        │            │
+│         └──────────────┬───────────────────────┘            │
+│                  FastAPI + Uvicorn                          │
+│                        │                                    │
+│              Job manager (thread pool)                      │
+│         ┌──────────────┼──────────────┐                     │
+│      aria2c        yt-dlp core      ffmpeg                  │
+│         └──────────────┴──────────────┘                     │
+│                  SQLite (WAL) + TT_* config                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 

@@ -233,21 +233,25 @@ class JobState:
         failed = sum(1 for item in self.items if item.status == "failed")
         cancelled = sum(1 for item in self.items if item.status == "cancelled")
         interrupted = sum(1 for item in self.items if item.status == "interrupted")
-        active = sum(1 for item in self.items if item.status in ACTIVE)
+        active = sum(1 for item in self.items if item.status in {"running", "downloading", "processing"})
+        queued = sum(1 for item in self.items if item.status == "queued")
 
         total_bytes = sum(item.total for item in self.items)
         downloaded = sum(item.downloaded for item in self.items)
-        if total_bytes > 0:
-            percent = min(100.0, downloaded / total_bytes * 100)
-        elif self.items:
-            percent = sum(item.percent for item in self.items) / len(self.items)
-        else:
+        if not self.items:
             percent = 0.0
+        elif completed == len(self.items):
+            percent = 100.0
+        elif all(item.total > 0 for item in self.items) and total_bytes > 0:
+            percent = min(99.9, downloaded / total_bytes * 100)
+        else:
+            avg = sum(item.percent for item in self.items) / len(self.items)
+            percent = min(99.9, avg)
 
         speed = sum(item.speed for item in self.items if item.status in ACTIVE)
         remaining = max(0, total_bytes - downloaded)
         eta = None
-        if speed > 0 and remaining:
+        if speed > 0 and remaining and total_bytes > 0:
             eta = remaining / speed
 
         payload: dict[str, Any] = {
@@ -266,7 +270,8 @@ class JobState:
             "cancelled_items": cancelled,
             "interrupted_items": interrupted,
             "active_items": active,
-            "percent": round(min(100.0, percent), 1),
+            "queued_items": queued,
+            "percent": round(percent, 1),
             "downloaded": downloaded,
             "total_bytes": total_bytes,
             "speed": round(speed, 1),
@@ -484,7 +489,7 @@ class JobManager:
             self.store.save_items([item.to_store() for item in job.items])
             self.store.prune(self.settings.max_history)
             self._trim_memory()
-        self._emit_job(job)
+        self._emit_job(job, include_items=True)
         for item in job.items:
             self._submit(item)
         log.info("Created job %s (%s item(s)): %s", job.id, len(job.items), job.title)
@@ -568,7 +573,7 @@ class JobManager:
             item.speed = 0.0
             item.eta = None
             item.updated_at = time.time()
-        self._emit_item(item)
+        self._emit_item(item, "video_started")
         self._persist_items([item])
         # Promote the job to "running" as soon as its first worker starts so
         # the UI and REST clients never see a queued job with active items.
@@ -638,6 +643,7 @@ class JobManager:
                     attempts,
                     item.total,
                 )
+                self._emit_item(item, "video_completed")
                 break
 
         self._persist_items([item])
@@ -645,12 +651,15 @@ class JobManager:
 
     def _set_status(self, item: ItemState, status: str, *, error: str = "") -> None:
         with self._lock:
+            if item.status == status and item.error == error and status in {"completed", "cancelled"}:
+                return
             item.status = status
             item.error = error
             item.speed = 0.0
             item.eta = None if status != "completed" else 0
             item.updated_at = time.time()
-        self._emit_item(item)
+        event_type = f"video_{status}" if status in {"failed", "cancelled", "completed"} else "video_progress"
+        self._emit_item(item, event_type)
         self._persist_items([item])
 
     def _on_progress(self, item: ItemState, data: dict[str, Any]) -> None:
@@ -664,6 +673,8 @@ class JobManager:
             key = str(info.get("format_id") or data.get("filename") or "stream")
             total = data.get("total_bytes") or data.get("total_bytes_estimate")
             downloaded = data.get("downloaded_bytes")
+            frag_index = data.get("fragment_index")
+            frag_count = data.get("fragment_count")
             now = time.time()
             with self._lock:
                 if status == "finished":
@@ -674,6 +685,8 @@ class JobManager:
                     downloaded = 0
                 item.streams[key] = (int(downloaded or 0), int(total) if total else None)
                 self._recalculate(item)
+                if (not item.total or item.percent == 0.0) and frag_index is not None and frag_count:
+                    item.percent = min(99.9, (frag_index / frag_count) * 100)
                 item.status = "downloading"
                 if status == "finished":
                     item.speed = 0.0
@@ -690,7 +703,7 @@ class JobManager:
                 if persist:
                     item.last_persist = now
             if due:
-                self._emit_item(item)
+                self._emit_item(item, "video_progress")
                 self._emit_job(job)
             if persist:
                 self._flusher.mark_dirty(item)
@@ -710,13 +723,16 @@ class JobManager:
             item.downloaded = downloaded
             item.percent = min(100.0, downloaded / total * 100) if total else 0.0
         else:
-            percents = [
-                (stream[0] / stream[1] * 100) if stream[1] else 0.0 for stream in item.streams.values()
-            ]
+            known_totals = [t for t in totals if t is not None and t > 0]
             item.downloaded = downloaded
-            item.total = max(item.total, sum(t for t in totals if t))
-            item.percent = min(100.0, sum(percents) / len(percents))
-        if item.percent >= 99.9:
+            if known_totals and len(known_totals) == len(totals):
+                total = int(sum(known_totals))
+                item.total = total
+                item.percent = min(100.0, downloaded / total * 100) if total else 0.0
+            else:
+                item.total = sum(known_totals) if known_totals else 0
+                item.percent = 0.0
+        if item.percent >= 99.9 and item.status != "completed":
             item.percent = 99.9  # 100% only once post-processing is done
 
     def _on_postprocess(self, item: ItemState, data: dict[str, Any]) -> None:
@@ -727,7 +743,7 @@ class JobManager:
                 item.speed = 0.0
                 item.eta = None
                 item.updated_at = time.time()
-            self._emit_item(item)
+            self._emit_item(item, "video_progress")
             job = self._jobs.get(item.job_id)
             if job:
                 self._emit_job(job)
@@ -778,11 +794,54 @@ class JobManager:
         except Exception:  # noqa: BLE001
             log.exception("Could not persist item progress")
 
-    def _emit_item(self, item: ItemState) -> None:
-        self.bus.publish({"type": "item", "job_id": item.job_id, "item": item.to_dict()})
+    def _emit_item(self, item: ItemState, event_type: str | None = None) -> None:
+        if event_type is None:
+            if item.status == "running":
+                event_type = "video_started"
+            elif item.status in {"downloading", "processing"}:
+                event_type = "video_progress"
+            elif item.status == "completed":
+                event_type = "video_completed"
+            elif item.status == "failed":
+                event_type = "video_failed"
+            elif item.status == "cancelled":
+                event_type = "video_cancelled"
+            else:
+                event_type = "video_progress"
 
-    def _emit_job(self, job: JobState) -> None:
-        self.bus.publish({"type": "job", "job": job.summary(include_items=False)})
+        payload = {
+            "type": event_type,
+            "job_id": item.job_id,
+            "video_id": item.id,
+            "item_id": item.id,
+            "status": item.status,
+            "percent": round(item.percent, 1),
+            "speed": round(item.speed, 1),
+            "eta": item.eta,
+            "downloaded": item.downloaded,
+            "total": item.total,
+            "filepath": item.filepath,
+            "error": item.error,
+            "updated_at": item.updated_at,
+            "item": item.to_dict(),
+        }
+        self.bus.publish(payload)
+
+    def _emit_job(self, job: JobState, *, include_items: bool = False) -> None:
+        summary = job.summary(include_items=include_items)
+        self.bus.publish({
+            "type": "queue_updated",
+            "job_id": job.id,
+            "job": summary,
+            "total_items": summary["total_items"],
+            "completed_items": summary["completed_items"],
+            "active_items": summary["active_items"],
+            "queued_items": summary["queued_items"],
+            "failed_items": summary["failed_items"],
+            "cancelled_items": summary["cancelled_items"],
+            "percent": summary["percent"],
+        })
+        self.bus.publish({"type": "job", "job": summary})
 
     def _log_line(self, item: ItemState, message: str) -> None:
         text = str(message).replace("\r", " ").strip()
@@ -861,6 +920,7 @@ class JobManager:
         for item in job.items:
             if item.status in {"failed", "cancelled", "interrupted"}:
                 self._reset_item(item, preserve_progress=preserve_progress)
+                self._emit_item(item, "video_progress")
                 self._submit(item)
                 resubmitted += 1
         if resubmitted:
@@ -877,6 +937,7 @@ class JobManager:
                 if item.status not in {"failed", "cancelled", "interrupted"}:
                     return False
                 self._reset_item(item, preserve_progress=preserve_progress)
+                self._emit_item(item, "video_progress")
                 self._submit(item)
                 self._recompute_status(job)
                 return True

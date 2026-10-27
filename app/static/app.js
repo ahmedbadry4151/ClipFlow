@@ -680,12 +680,160 @@ function getSmoothedSpeed(job) {
 }
 
 function jobMetaText(job) {
-  const parts = [`${job.completed_items || 0}/${job.total_items || 1} completed`];
+  const parts = [`${job.completed_items || 0} / ${job.total_items || 1} completed`];
   if (job.failed_items) parts.push(`${job.failed_items} failed`);
+  if (job.cancelled_items) parts.push(`${job.cancelled_items} cancelled`);
   const liveSpeed = getSmoothedSpeed(job);
   if (liveSpeed > 0) parts.push(`${bytes(liveSpeed)}/s`);
   if (job.eta) parts.push(`ETA ${duration(job.eta)}`);
   return parts.join(" · ");
+}
+
+function activeItemText(job) {
+  if (!job.items || job.items.length <= 1) return "";
+  const activeItems = job.items.filter((i) => ["running", "downloading", "processing"].includes(i.status));
+  if (activeItems.length === 1) {
+    const item = activeItems[0];
+    const verb = item.status === "processing" ? "Processing" : (item.status === "running" ? "Starting" : "Downloading");
+    return `${verb} #${item.index}: ${item.title || "Item"}`;
+  } else if (activeItems.length > 1) {
+    return `Downloading ${activeItems.length} videos concurrently`;
+  }
+  return "";
+}
+
+function itemStatusHTML(item) {
+  const itemPercent = Math.max(0, Math.min(100, item.percent || 0));
+  if (item.status === "completed") {
+    const sizeStr = item.total ? ` (${bytes(item.total)})` : "";
+    return `<span style="color:var(--green); font-weight:700;">${icon("check")} 100% Done${esc(sizeStr)}</span>`;
+  }
+  if (item.status === "failed") {
+    return `<span style="color:var(--red); font-weight:700;" title="${esc(item.error)}">${icon("alert")} Failed</span>`;
+  }
+  if (item.status === "downloading") {
+    const isIndeterminate = (!item.total || item.total <= 0) && (!item.percent || item.percent === 0);
+    const pctStr = isIndeterminate ? "Downloading" : `${itemPercent.toFixed(0)}%`;
+    const parts = [`<span style="color:var(--accent-text); font-weight:700;">${pctStr}</span>`];
+    if (item.downloaded > 0) {
+      if (item.total > 0) parts.push(`<span class="muted">${bytes(item.downloaded)} / ${bytes(item.total)}</span>`);
+      else parts.push(`<span class="muted">${bytes(item.downloaded)}</span>`);
+    }
+    if (item.speed > 0) parts.push(`<span class="muted">${bytes(item.speed)}/s</span>`);
+    if (item.eta) parts.push(`<span class="muted">ETA ${duration(item.eta)}</span>`);
+    return parts.join(" · ");
+  }
+  if (item.status === "processing") {
+    return `<span style="color:#D99B00; font-weight:700;">${icon("spark")} Processing…</span>`;
+  }
+  if (item.status === "running") {
+    return `<span style="color:var(--accent-text); font-weight:700;">Starting…</span>`;
+  }
+  if (item.status === "interrupted") {
+    return `<span style="color:#D99B00; font-weight:700;">${itemPercent > 0 ? `${itemPercent.toFixed(0)}% (Paused)` : "Paused"}</span>`;
+  }
+  if (item.status === "cancelled") {
+    return `<span class="muted">${icon("x")} Cancelled</span>`;
+  }
+  return `<span class="muted">Queued</span>`;
+}
+
+function itemFillClasses(item) {
+  const isRunning = ["running", "downloading", "processing"].includes(item.status);
+  const isIndeterminate = item.status === "downloading" && (!item.total || item.total <= 0) && (!item.percent || item.percent === 0);
+  return [
+    "job-progress-fill",
+    isRunning ? (item.status === "processing" ? "processing" : "is-active") : "",
+    isIndeterminate ? "indeterminate" : "",
+    item.status === "completed" ? "completed" : "",
+  ].filter(Boolean).join(" ");
+}
+
+function itemRowHTML(item, jobId) {
+  const itemPercent = Math.max(0, Math.min(100, item.percent || 0));
+  const itemCanResume = ["interrupted", "cancelled", "failed"].includes(item.status);
+  const itemCanCancel = ["queued", "running", "downloading", "processing"].includes(item.status);
+  const fillWidth = item.status === "completed" ? 100 : (item.status === "processing" ? (itemPercent || 99.9) : itemPercent);
+
+  return `
+    <div class="job-item-row" data-item-id="${item.id}" data-item-status="${item.status}">
+      <div class="job-item-main">
+        <span class="job-item-title" title="${esc(item.title)}">#${item.index} ${esc(item.title || "Item")}</span>
+        <div class="job-item-meta">
+          <div class="job-item-status-text">${itemStatusHTML(item)}</div>
+          ${item.filepath ? `<span class="muted job-item-file">(${esc(baseName(item.filepath))})</span>` : ""}
+          ${itemCanResume ? `<button type="button" class="btn micro primary" data-action="resume-item" data-job="${jobId}" data-item="${item.id}" title="Resume this item from partial progress">${icon("play")} Resume</button>` : ""}
+          ${itemCanCancel ? `<button type="button" class="btn micro danger" data-action="cancel-item" data-job="${jobId}" data-item="${item.id}" title="Cancel this video">${icon("x")} Cancel</button>` : ""}
+        </div>
+      </div>
+      <div class="job-item-progress-wrap">
+        <div class="job-item-progress-bar">
+          <div class="${itemFillClasses(item)}" style="width: ${fillWidth}%;"></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function patchItemRow(row, item, jobId) {
+  row.dataset.itemStatus = item.status;
+  const itemPercent = Math.max(0, Math.min(100, item.percent || 0));
+  const fillWidth = item.status === "completed" ? 100 : (item.status === "processing" ? (itemPercent || 99.9) : itemPercent);
+
+  const statusEl = row.querySelector(".job-item-status-text");
+  if (statusEl) {
+    statusEl.innerHTML = itemStatusHTML(item);
+  }
+
+  const fill = row.querySelector(".job-item-progress-bar .job-progress-fill");
+  if (fill) {
+    fill.style.width = `${fillWidth}%`;
+    fill.className = itemFillClasses(item);
+  }
+
+  const meta = row.querySelector(".job-item-meta");
+  if (meta) {
+    if (item.filepath) {
+      let fileSpan = meta.querySelector(".job-item-file");
+      if (!fileSpan) {
+        fileSpan = document.createElement("span");
+        fileSpan.className = "muted job-item-file";
+        meta.appendChild(fileSpan);
+      }
+      fileSpan.textContent = `(${baseName(item.filepath)})`;
+    }
+
+    const itemCanResume = ["interrupted", "cancelled", "failed"].includes(item.status);
+    let resumeBtn = meta.querySelector(`[data-action="resume-item"]`);
+    if (itemCanResume && !resumeBtn) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn micro primary";
+      btn.dataset.action = "resume-item";
+      btn.dataset.job = jobId;
+      btn.dataset.item = item.id;
+      btn.title = "Resume this item from partial progress";
+      btn.innerHTML = `${icon("play")} Resume`;
+      meta.appendChild(btn);
+    } else if (!itemCanResume && resumeBtn) {
+      resumeBtn.remove();
+    }
+
+    const itemCanCancel = ["queued", "running", "downloading", "processing"].includes(item.status);
+    let cancelBtn = meta.querySelector(`[data-action="cancel-item"]`);
+    if (itemCanCancel && !cancelBtn) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn micro danger";
+      btn.dataset.action = "cancel-item";
+      btn.dataset.job = jobId;
+      btn.dataset.item = item.id;
+      btn.title = "Cancel this video";
+      btn.innerHTML = `${icon("x")} Cancel`;
+      meta.appendChild(btn);
+    } else if (!itemCanCancel && cancelBtn) {
+      cancelBtn.remove();
+    }
+  }
 }
 
 function jobCardHTML(job) {
@@ -717,31 +865,17 @@ function jobCardHTML(job) {
     </div>` : "";
 
   let itemsAccordionHTML = "";
-  if (job.items && job.items.length > 1) {
+  if (job.items && (job.items.length > 1 || job.kind === "playlist")) {
+    const isJobActive = ["running", "downloading", "processing"].includes(job.status);
+    const isOpen = isJobActive ? "open" : "";
     itemsAccordionHTML = `
-      <details class="job-items-accordion">
+      <details class="job-items-accordion" ${isOpen}>
         <summary class="job-items-summary">
-          <span>${job.completed_items || 0} of ${job.total_items} items detailed</span>
+          <span>${job.completed_items || 0} / ${job.total_items} completed</span>
           <svg class="chev"><use href="#i-chevron"/></svg>
         </summary>
         <div class="job-items-list">
-          ${job.items.map((item) => {
-            const itemCanResume = ["interrupted", "cancelled", "failed"].includes(item.status);
-            const itemPercent = Math.max(0, Math.min(100, item.percent || 0));
-            return `
-            <div class="job-item-row" data-item-id="${item.id}">
-              <span class="job-item-title" title="${esc(item.title)}">#${item.index} ${esc(item.title || "Item")}</span>
-              <div class="job-item-meta">
-                ${item.status === "completed" ? `<span style="color:var(--green); font-weight:700;">${icon("check")} Done</span>` :
-                  item.status === "failed" ? `<span style="color:var(--red); font-weight:700;" title="${esc(item.error)}">${icon("alert")} Failed</span>` :
-                  item.status === "downloading" ? `<span style="color:var(--accent-text); font-weight:700;">${itemPercent.toFixed(0)}%</span>` :
-                  item.status === "interrupted" ? `<span style="color:#D99B00; font-weight:700;">${itemPercent > 0 ? `${itemPercent.toFixed(0)}% (Paused)` : 'Paused'}</span>` :
-                  `<span class="muted">${esc(item.status)}</span>`}
-                ${item.filepath ? `<span class="muted">(${esc(baseName(item.filepath))})</span>` : ""}
-                ${itemCanResume ? `<button type="button" class="btn micro primary" data-action="resume-item" data-job="${job.id}" data-item="${item.id}" title="Resume this item from partial progress">${icon("play")} Resume</button>` : ""}
-              </div>
-            </div>`;
-          }).join("")}
+          ${job.items.map((item) => itemRowHTML(item, job.id)).join("")}
         </div>
       </details>`;
   }
@@ -763,6 +897,8 @@ function jobCardHTML(job) {
     job.status === "completed" ? "completed" : "",
   ].filter(Boolean).join(" ");
 
+  const activeHeader = activeItemText(job);
+
   return `
     <article class="job-card ${isRunning ? "is-active" : ""}" data-job="${job.id}" data-status="${job.status}">
       <div class="job-head">
@@ -774,6 +910,7 @@ function jobCardHTML(job) {
               ${formatBadge}
             </div>
             <h3 class="job-title" title="${esc(job.title)}">${esc(job.title || "Media Download")}</h3>
+            ${activeHeader ? `<div class="job-active-item" style="font-size:12px; font-weight:600; color:var(--accent-text); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(activeHeader)}">${esc(activeHeader)}</div>` : ""}
           </div>
         </div>
         <div class="job-actions" data-last-status="${job.status}">
@@ -808,6 +945,26 @@ function patchJobCard(card, job) {
   card.classList.toggle("is-active", isRunning);
   card.dataset.status = job.status;
 
+  // Active item title under job title
+  const titleEl = card.querySelector(".job-title");
+  const activeTxt = activeItemText(job);
+  let activeEl = card.querySelector(".job-active-item");
+  if (activeTxt) {
+    if (!activeEl && titleEl) {
+      activeEl = document.createElement("div");
+      activeEl.className = "job-active-item";
+      activeEl.style.cssText = "font-size:12px; font-weight:600; color:var(--accent-text); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+      titleEl.after(activeEl);
+    }
+    if (activeEl) {
+      activeEl.textContent = activeTxt;
+      activeEl.title = activeTxt;
+      activeEl.classList.remove("hidden");
+    }
+  } else if (activeEl) {
+    activeEl.remove();
+  }
+
   // Status badge update
   const badgeWrap = card.querySelector(".job-head .status-badge");
   if (badgeWrap && !badgeWrap.classList.contains(job.status)) {
@@ -830,7 +987,10 @@ function patchJobCard(card, job) {
   const metaRow = card.querySelector(".job-meta-row");
   if (metaRow) {
     const leftText = job.status === "processing" ? "Processing streams (FFmpeg muxing/embedding)…" : jobMetaText(job);
-    const rightText = `${percent.toFixed(percent < 10 ? 1 : 0)}% (${bytes(job.downloaded)} / ${bytes(job.total_bytes)})`;
+    const bytesText = job.total_bytes > 0
+      ? `(${bytes(job.downloaded)} / ${bytes(job.total_bytes)})`
+      : (job.downloaded > 0 ? `(${bytes(job.downloaded)})` : "");
+    const rightText = `${percent.toFixed(percent < 10 ? 1 : 0)}% ${bytesText}`.trim();
     const spans = metaRow.querySelectorAll("span");
     if (spans.length >= 2) {
       if (spans[0].textContent !== leftText) spans[0].textContent = leftText;
@@ -890,35 +1050,46 @@ function patchJobCard(card, job) {
     banner.remove();
   }
 
-  // Update accordion summary count if present
-  const summarySpan = card.querySelector(".job-items-summary span");
-  if (summarySpan) {
-    const totalCount = job.total_items || (job.items ? job.items.length : 1);
-    const summaryText = `${job.completed_items || 0} of ${totalCount} items detailed`;
-    if (summarySpan.textContent !== summaryText) summarySpan.textContent = summaryText;
-  }
-
   // Update items in accordion if present
-  if (job.items && job.items.length > 1) {
-    job.items.forEach((item) => {
-      const row = card.querySelector(`.job-item-row[data-item-id="${item.id}"]`);
-      if (row) {
-        const meta = row.querySelector(".job-item-meta");
-        if (meta) {
-          const itemCanResume = ["interrupted", "cancelled", "failed"].includes(item.status);
-          const itemPercent = Math.max(0, Math.min(100, item.percent || 0));
-          meta.innerHTML = `
-            ${item.status === "completed" ? `<span style="color:var(--green); font-weight:700;">${icon("check")} Done</span>` :
-              item.status === "failed" ? `<span style="color:var(--red); font-weight:700;" title="${esc(item.error)}">${icon("alert")} Failed</span>` :
-              item.status === "downloading" ? `<span style="color:var(--accent-text); font-weight:700;">${itemPercent.toFixed(0)}%</span>` :
-              item.status === "interrupted" ? `<span style="color:#D99B00; font-weight:700;">${itemPercent > 0 ? `${itemPercent.toFixed(0)}% (Paused)` : 'Paused'}</span>` :
-              `<span class="muted">${esc(item.status)}</span>`}
-            ${item.filepath ? `<span class="muted">(${esc(baseName(item.filepath))})</span>` : ""}
-            ${itemCanResume ? `<button type="button" class="btn micro primary" data-action="resume-item" data-job="${job.id}" data-item="${item.id}" title="Resume this item from partial progress">${icon("play")} Resume</button>` : ""}
-          `;
-        }
+  if (job.items && (job.items.length > 1 || job.kind === "playlist")) {
+    let accordion = card.querySelector(".job-items-accordion");
+    if (!accordion) {
+      const isJobActive = ["running", "downloading", "processing"].includes(job.status);
+      const isOpen = isJobActive ? "open" : "";
+      const temp = document.createElement("div");
+      temp.innerHTML = `
+        <details class="job-items-accordion" ${isOpen}>
+          <summary class="job-items-summary">
+            <span>${job.completed_items || 0} / ${job.total_items || job.items.length} completed</span>
+            <svg class="chev"><use href="#i-chevron"/></svg>
+          </summary>
+          <div class="job-items-list">
+            ${job.items.map((item) => itemRowHTML(item, job.id)).join("")}
+          </div>
+        </details>`.trim();
+      card.appendChild(temp.firstElementChild);
+    } else {
+      const summarySpan = accordion.querySelector(".job-items-summary span");
+      if (summarySpan) {
+        const totalCount = job.total_items || job.items.length;
+        const summaryText = `${job.completed_items || 0} / ${totalCount} completed`;
+        if (summarySpan.textContent !== summaryText) summarySpan.textContent = summaryText;
       }
-    });
+      const list = accordion.querySelector(".job-items-list");
+      if (list) {
+        job.items.forEach((item) => {
+          let row = list.querySelector(`.job-item-row[data-item-id="${item.id}"]`);
+          if (!row) {
+            const temp = document.createElement("div");
+            temp.innerHTML = itemRowHTML(item, job.id).trim();
+            row = temp.firstElementChild;
+            list.appendChild(row);
+          } else {
+            patchItemRow(row, item, job.id);
+          }
+        });
+      }
+    }
   }
 }
 
@@ -1040,25 +1211,28 @@ function updateOverviewWidgets() {
       const titleEl = spotlightBody.querySelector("h4");
       const pctEl = spotlightBody.querySelector("[data-spotlight-pct]");
       const speedEl = spotlightBody.querySelector("[data-spotlight-speed]");
-      const bytesEl = spotlightBody.querySelector("[data-spotlight-bytes]");
-      if (titleEl && titleEl.textContent !== (activeJob.title || "Active Download")) {
-        titleEl.textContent = activeJob.title || "Active Download";
+      const activeItem = activeJob.items ? activeJob.items.find((i) => ["downloading", "running", "processing"].includes(i.status)) : null;
+      const displayTitle = activeItem ? `${activeJob.title} · #${activeItem.index} ${activeItem.title}` : (activeJob.title || "Active Download");
+      if (titleEl && titleEl.textContent !== displayTitle) {
+        titleEl.textContent = displayTitle;
       }
-      if (pctEl) pctEl.textContent = `${percent.toFixed(0)}%`;
+      if (pctEl) pctEl.textContent = `${percent.toFixed(0)}% (${activeJob.completed_items || 0}/${activeJob.total_items || 1})`;
       if (speedEl) speedEl.textContent = `${bytes(smoothedSpd)}/s · ETA ${duration(activeJob.eta)}`;
-      if (bytesEl) bytesEl.textContent = `${bytes(activeJob.downloaded)} of ${bytes(activeJob.total_bytes)}`;
+      if (bytesEl) bytesEl.textContent = activeJob.total_bytes > 0 ? `${bytes(activeJob.downloaded)} of ${bytes(activeJob.total_bytes)}` : `${bytes(activeJob.downloaded)}`;
     } else {
+      const activeItem = activeJob.items ? activeJob.items.find((i) => ["downloading", "running", "processing"].includes(i.status)) : null;
+      const displayTitle = activeItem ? `${activeJob.title} · #${activeItem.index} ${activeItem.title}` : (activeJob.title || "Active Download");
       spotlightBody.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <h4 style="font-family:var(--font-heading); font-size:16px; font-weight:800;">${esc(activeJob.title || "Active Download")}</h4>
-          <span data-spotlight-pct style="font-family:var(--font-mono); font-size:13px; font-weight:700;">${percent.toFixed(0)}%</span>
+          <h4 style="font-family:var(--font-heading); font-size:16px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;" title="${esc(displayTitle)}">${esc(displayTitle)}</h4>
+          <span data-spotlight-pct style="font-family:var(--font-mono); font-size:13px; font-weight:700;">${percent.toFixed(0)}% (${activeJob.completed_items || 0}/${activeJob.total_items || 1})</span>
         </div>
         <div class="job-progress-bar" style="margin-bottom:10px;">
           <div class="job-progress-fill is-active" style="width:${percent}%;"></div>
         </div>
         <div style="display:flex; justify-content:space-between; font-size:12.5px; color:var(--text-secondary); font-family:var(--font-mono); font-variant-numeric:tabular-nums;">
           <span data-spotlight-speed>${bytes(smoothedSpd)}/s · ETA ${duration(activeJob.eta)}</span>
-          <span data-spotlight-bytes>${bytes(activeJob.downloaded)} of ${bytes(activeJob.total_bytes)}</span>
+          <span data-spotlight-bytes>${activeJob.total_bytes > 0 ? `${bytes(activeJob.downloaded)} of ${bytes(activeJob.total_bytes)}` : `${bytes(activeJob.downloaded)}`}</span>
         </div>`;
     }
   } else if (spotlightSection) {
@@ -1220,8 +1394,140 @@ async function cleanTempFiles() {
 }
 
 /* ------------------------------------------------------------------ sync */
-function upsertJob(job) {
+function mergeJob(incoming) {
+  const existing = state.jobs.get(incoming.id);
+  if (existing) {
+    if (!incoming.items && existing.items) {
+      incoming.items = existing.items;
+    } else if (incoming.items && existing.items) {
+      const existingItemsMap = new Map(existing.items.map((i) => [i.id, i]));
+      incoming.items = incoming.items.map((item) => {
+        const prev = existingItemsMap.get(item.id);
+        if (prev) {
+          if (prev.status === "completed" && item.status !== "completed") {
+            return prev;
+          }
+          return Object.assign(prev, item);
+        }
+        return item;
+      });
+    }
+    if (!incoming.options && existing.options) incoming.options = existing.options;
+    if (!incoming.url && existing.url) incoming.url = existing.url;
+    if (!incoming.title && existing.title) incoming.title = existing.title;
+    if (!incoming.kind && existing.kind) incoming.kind = existing.kind;
+  }
+  return incoming;
+}
+
+function handleVideoEvent(data) {
+  const jobId = data.job_id;
+  const itemId = data.video_id || data.item_id || data.item?.id;
+  if (!jobId) return;
+
+  const job = state.jobs.get(jobId);
+  if (!job) return;
+
+  if (job.items) {
+    let item = job.items.find((i) => i.id === itemId);
+    if (!item && data.item) {
+      item = data.item;
+      job.items.push(item);
+    }
+    if (item) {
+      // Reject stale out-of-order events based on timestamp
+      const eventTime = data.updated_at || data.item?.updated_at;
+      if (item.updated_at && eventTime && eventTime < item.updated_at) {
+        return;
+      }
+      // Prevent regression from completed
+      if (item.status === "completed" && data.status !== "completed") {
+        return;
+      }
+
+      if (data.item) {
+        Object.assign(item, data.item);
+      }
+      if (data.status) item.status = data.status;
+      if (data.percent !== undefined) item.percent = data.percent;
+      if (data.speed !== undefined) item.speed = data.speed;
+      if (data.eta !== undefined) item.eta = data.eta;
+      if (data.downloaded !== undefined) item.downloaded = data.downloaded;
+      if (data.total !== undefined) item.total = data.total;
+      if (data.filepath) item.filepath = data.filepath;
+      if (data.error !== undefined) item.error = data.error;
+      if (eventTime) item.updated_at = eventTime;
+
+      if (item.status === "completed") {
+        item.percent = 100.0;
+        item.speed = 0.0;
+        item.eta = 0.0;
+      }
+
+      // Recompute job summary counters
+      job.completed_items = job.items.filter((i) => i.status === "completed").length;
+      job.failed_items = job.items.filter((i) => i.status === "failed").length;
+      job.cancelled_items = job.items.filter((i) => i.status === "cancelled").length;
+      job.active_items = job.items.filter((i) => ["running", "downloading", "processing"].includes(i.status)).length;
+      job.queued_items = job.items.filter((i) => i.status === "queued").length;
+
+      // Recompute job status if all items are done
+      if (job.completed_items === job.items.length && job.items.length > 0) {
+        job.status = "completed";
+      } else if (job.active_items > 0) {
+        job.status = "running";
+      }
+
+      // Recompute overall job percent
+      if (job.items.length > 0) {
+        if (job.completed_items === job.items.length) {
+          job.percent = 100.0;
+        } else {
+          const avg = job.items.reduce((acc, i) => acc + (i.percent || 0), 0) / job.items.length;
+          job.percent = Math.min(99.9, avg);
+        }
+        job.downloaded = job.items.reduce((acc, i) => acc + (i.downloaded || 0), 0);
+        job.total_bytes = job.items.reduce((acc, i) => acc + (i.total || 0), 0);
+        job.speed = job.items.filter((i) => ["running", "downloading"].includes(i.status)).reduce((acc, i) => acc + (i.speed || 0), 0);
+      }
+    }
+  }
+
+  // Update card in DOM directly without re-rendering the whole queue
+  const card = document.querySelector(`.job-card[data-job="${jobId}"]`);
+  if (card) {
+    patchJobCard(card, job);
+    updateQueueMeta();
+  } else {
+    renderJobs();
+  }
+  if (state.currentPage === "overview") updateOverviewWidgets();
+}
+
+let lastQueueSig = "";
+function handleQueueUpdated(data) {
+  const job = data.job || data;
+  if (!job || !job.id) return;
+  const sig = `${job.id}:${job.status}:${job.percent}:${job.completed_items}:${job.active_items}:${job.downloaded}:${job.speed}:${job.updated_at || ""}`;
+  if (sig === lastQueueSig) return;
+  lastQueueSig = sig;
+  upsertJob(job);
+}
+
+function upsertJob(incoming) {
+  const job = mergeJob(incoming);
   state.jobs.set(job.id, job);
+  const container = $("#jobs");
+  if (container && state.queueFilter === "all" && !state.queueSearch) {
+    const card = container.querySelector(`.job-card[data-job="${job.id}"]`);
+    if (card) {
+      patchJobCard(card, job);
+      updateQueueMeta();
+      if (state.currentPage === "overview") updateOverviewWidgets();
+      if (state.currentPage === "history") renderHistory();
+      return;
+    }
+  }
   renderJobs();
   if (state.currentPage === "overview") updateOverviewWidgets();
   if (state.currentPage === "history") renderHistory();
@@ -1231,7 +1537,10 @@ async function syncJobs() {
   if (state.syncPromise) return state.syncPromise;
   state.syncPromise = api("/api/jobs")
     .then((payload) => {
-      state.jobs = new Map((payload.jobs || []).map((j) => [j.id, j]));
+      (payload.jobs || []).forEach((j) => {
+        const merged = mergeJob(j);
+        state.jobs.set(merged.id, merged);
+      });
       renderJobs();
       if (state.currentPage === "overview") updateOverviewWidgets();
       if (state.currentPage === "history") renderHistory();
@@ -1261,6 +1570,10 @@ async function handleJobAction(event) {
       const itemId = target.dataset.item;
       await api(`/api/jobs/${jobId}/items/${itemId}/resume`, { method: "POST" });
       toast("Resuming item from partial progress…", "ok");
+    } else if (action === "cancel-item") {
+      const itemId = target.dataset.item;
+      await api(`/api/jobs/${jobId}/items/${itemId}/cancel`, { method: "POST" });
+      toast("Cancelled video", "warn");
     } else if (action === "retry") {
       await api(`/api/jobs/${jobId}/retry`, { method: "POST" });
       toast("Restarting download…", "ok");
@@ -1411,12 +1724,24 @@ function connectEvents() {
     try {
       const data = JSON.parse(event.data);
       if (data.type === "snapshot") {
-        state.jobs = new Map((data.jobs || []).map((j) => [j.id, j]));
+        (data.jobs || []).forEach((j) => {
+          const merged = mergeJob(j);
+          state.jobs.set(merged.id, merged);
+        });
         renderJobs();
         if (state.currentPage === "overview") updateOverviewWidgets();
         if (state.currentPage === "history") renderHistory();
-      } else if (data.type === "job") {
-        upsertJob(data.job);
+      } else if (
+        data.type === "video_started" ||
+        data.type === "video_progress" ||
+        data.type === "video_completed" ||
+        data.type === "video_failed" ||
+        data.type === "video_cancelled" ||
+        data.type === "item"
+      ) {
+        handleVideoEvent(data);
+      } else if (data.type === "queue_updated" || data.type === "job") {
+        handleQueueUpdated(data);
       }
     } catch {
       /* ignore malformed frame */

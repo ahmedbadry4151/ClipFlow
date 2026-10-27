@@ -13,6 +13,7 @@ from fastapi import HTTPException, UploadFile
 
 from app import manager as manager_module
 from app.api import (
+    cancel_item,
     cancel_job,
     create_job,
     delete_job,
@@ -217,6 +218,14 @@ class DirectClient:
                 return DirectResponse(e.status_code, text=str(e.detail))
             except Exception as e:
                 return DirectResponse(400, text=str(e))
+        elif "/items/" in path and path.endswith("/cancel"):
+            parts = path.removeprefix("/api/jobs/").removesuffix("/cancel").split("/items/")
+            job_id, item_id = parts[0], parts[1]
+            try:
+                data = run_coro(cancel_item(job_id, item_id, req))
+                return DirectResponse(200, data)
+            except HTTPException as e:
+                return DirectResponse(e.status_code, text=str(e.detail))
         elif path.startswith("/api/jobs/") and path.endswith("/cancel"):
             job_id = path.removeprefix("/api/jobs/").removesuffix("/cancel")
             try:
@@ -484,3 +493,41 @@ def test_resume_api_endpoints(settings, monkeypatch):
         res_all = client.post("/api/jobs/resume-all")
         assert res_all.status_code == 200
         assert "resumed" in res_all.json()
+
+
+def test_cancel_item_api_endpoint(settings, monkeypatch):
+    monkeypatch.setattr(
+        manager_module,
+        "expand_playlist",
+        lambda *args, **kwargs: [{"url": VIDEO, "title": "Cancel Item Video", "index": 1, "duration": 30}],
+    )
+
+    def fake(url, options, settings_arg, **kwargs):
+        cancel_event = kwargs.get("cancel_event")
+        if cancel_event:
+            cancel_event.wait(timeout=5.0)
+            raise DownloadCancelled("Cancelled")
+        return {"id": "dummy"}
+
+    monkeypatch.setattr(manager_module, "run_download", fake)
+
+    with TestClient(settings) as client:
+        res = client.post("/api/jobs", json={"url": VIDEO, "options": {"mode": "video"}})
+        assert res.status_code == 201
+        job_id = res.json()["id"]
+
+        state = client.get(f"/api/jobs/{job_id}").json()
+        item_id = state["items"][0]["id"]
+
+        res_cancel = client.post(f"/api/jobs/{job_id}/items/{item_id}/cancel")
+        assert res_cancel.status_code == 200
+        assert res_cancel.json().get("cancelled") is True
+
+        for _ in range(100):
+            state = client.get(f"/api/jobs/{job_id}").json()
+            if state["status"] in {"cancelled", "partial"}:
+                break
+            time.sleep(0.05)
+        assert state["status"] in {"cancelled", "partial"}
+        assert state["items"][0]["status"] == "cancelled"
+

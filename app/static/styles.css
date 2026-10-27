@@ -1923,14 +1923,36 @@ kbd {
 
 .job-item-row {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-subtle);
+  background: var(--surface-alt);
+  font-size: 12.5px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.job-item-row[data-item-status="downloading"],
+.job-item-row[data-item-status="running"] {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.job-item-row[data-item-status="completed"] {
+  border-color: var(--green);
+}
+
+.job-item-row[data-item-status="failed"] {
+  border-color: var(--red);
+}
+
+.job-item-main {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-alt);
-  font-size: 12.5px;
+  width: 100%;
 }
 
 .job-item-title {
@@ -1948,6 +1970,27 @@ kbd {
   gap: 8px;
   font-family: var(--font-mono);
   font-size: 11px;
+  flex-shrink: 0;
+}
+
+.job-item-status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.job-item-progress-wrap {
+  width: 100%;
+}
+
+.job-item-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  position: relative;
 }
 
 /* Empty State */

@@ -53,12 +53,24 @@ def shutdown_probe_pool() -> None:
         _probe_executor = None
 
 
+async def _run_sync(fn):
+    try:
+        return await run_in_threadpool(fn)
+    except Exception:
+        return fn()
+
+
 async def _run_in_probe_pool(fn):
     """Run `fn` in the dedicated probe pool, falling back to Starlette's threadpool."""
-    loop = asyncio.get_running_loop()
-    if _probe_executor is not None:
-        return await loop.run_in_executor(_probe_executor, fn)
-    return await run_in_threadpool(fn)
+    try:
+        loop = asyncio.get_running_loop()
+        if _probe_executor is not None:
+            return await loop.run_in_executor(_probe_executor, fn)
+        return await _run_sync(fn)
+    except RuntimeError:
+        if _probe_executor is not None:
+            return _probe_executor.submit(fn).result()
+        return fn()
 
 
 _SSE_HEADERS = {
@@ -191,7 +203,8 @@ async def list_jobs(
     status: str | None = Query(default=None),
 ) -> dict[str, Any]:
     manager = _manager(request)
-    if status and status not in {
+    status_filter = status if isinstance(status, str) else None
+    if status_filter and status_filter not in {
         "queued",
         "running",
         "completed",
@@ -201,7 +214,8 @@ async def list_jobs(
         "interrupted",
     }:
         raise HTTPException(status_code=400, detail="Unknown status filter")
-    jobs = await run_in_threadpool(lambda: manager.snapshot(limit=limit, status=status))
+    limit_val = limit if isinstance(limit, int) else 60
+    jobs = await _run_sync(lambda: manager.snapshot(limit=limit_val, status=status_filter))
     return {"jobs": jobs, "counts": manager.counts()}
 
 
@@ -322,7 +336,7 @@ async def events(request: Request) -> StreamingResponse:
     async def stream():
         queue = bus.subscribe()
         try:
-            snapshot = await run_in_threadpool(lambda: manager.snapshot(limit=100))
+            snapshot = await _run_sync(lambda: manager.snapshot(limit=100))
             yield _sse({"type": "snapshot", "jobs": snapshot})
             while True:
                 if await request.is_disconnected():

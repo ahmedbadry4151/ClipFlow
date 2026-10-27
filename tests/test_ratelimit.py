@@ -70,3 +70,21 @@ def test_ratelimit_concurrency():
         t.join()
 
     assert allowed_count == 50
+
+
+def test_ratelimit_prune_stale_keys():
+    limiter = RateLimiter(max_requests=5, window_seconds=0.05, max_keys=3)
+    # Fill up 3 keys
+    limiter.allow("ip1")
+    limiter.allow("ip2")
+    limiter.allow("ip3")
+    assert len(limiter._hits) == 3
+
+    # Wait for timestamps to become stale
+    time.sleep(0.06)
+
+    # 4th key triggers pruning of expired keys
+    limiter.allow("ip4")
+    # Expired keys should be purged, keeping memory bounded
+    assert len(limiter._hits) <= 3
+    assert "ip4" in limiter._hits

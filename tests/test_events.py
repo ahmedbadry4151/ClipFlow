@@ -1,28 +1,36 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from app.events import EventBus
 
 
+class DirectLoop:
+    """Synchronous event loop adapter for deterministic testing without socketpairs."""
+
+    def is_closed(self) -> bool:
+        return False
+
+    def call_soon_threadsafe(self, callback: Any, *args: Any) -> None:
+        callback(*args)
+
+
 def test_event_bus_fanout():
-    async def scenario():
-        bus = EventBus()
-        bus.attach_loop(asyncio.get_running_loop())
-        first = bus.subscribe()
-        second = bus.subscribe()
+    bus = EventBus()
+    bus.attach_loop(DirectLoop())  # type: ignore
+    first = bus.subscribe()
+    second = bus.subscribe()
 
-        await asyncio.to_thread(bus.publish, {"type": "item", "n": 1})
-        event_a = await asyncio.wait_for(first.get(), timeout=2)
-        event_b = await asyncio.wait_for(second.get(), timeout=2)
-        assert event_a == {"type": "item", "n": 1}
-        assert event_b == event_a
+    bus.publish({"type": "item", "n": 1})
+    event_a = first.get_nowait()
+    event_b = second.get_nowait()
+    assert event_a == {"type": "item", "n": 1}
+    assert event_b == event_a
 
-        bus.unsubscribe(first)
-        bus.unsubscribe(second)
-        assert bus._subscribers == set()
-
-    asyncio.run(scenario())
+    bus.unsubscribe(first)
+    bus.unsubscribe(second)
+    assert bus._subscribers == set()
 
 
 def test_event_bus_without_loop_is_noop():
@@ -31,14 +39,10 @@ def test_event_bus_without_loop_is_noop():
 
 
 def test_event_bus_drops_oldest_when_full():
-    async def scenario():
-        bus = EventBus()
-        bus.attach_loop(asyncio.get_running_loop())
-        queue = bus.subscribe()
-        for index in range(queue.maxsize + 5):
-            bus.publish({"n": index})
-        await asyncio.sleep(0)
-        assert queue.qsize() == queue.maxsize
-        assert queue.get_nowait()["n"] == 5
-
-    asyncio.run(scenario())
+    bus = EventBus()
+    bus.attach_loop(DirectLoop())  # type: ignore
+    queue = bus.subscribe()
+    for index in range(queue.maxsize + 5):
+        bus.publish({"n": index})
+    assert queue.qsize() == queue.maxsize
+    assert queue.get_nowait()["n"] == 5

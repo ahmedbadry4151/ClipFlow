@@ -113,7 +113,13 @@ class Store:
             return self._create_connection()
 
     def _release(self, conn: sqlite3.Connection) -> None:
-        self._pool.put(conn)
+        if self._pool.qsize() >= _POOL_SIZE:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        else:
+            self._pool.put(conn)
 
     # -- writes ---------------------------------------------------------
     def save_job(self, job: dict[str, Any]) -> None:

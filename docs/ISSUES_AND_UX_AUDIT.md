@@ -167,12 +167,58 @@ The application has been successfully transformed into the Positivus-inspired ae
 
 | Test Module | Coverage Area | Result | Notes |
 |---|---|---|---|
+| `tests/test_api.py` | API endpoints, key auth, probe safety, job creation, cookies | **PASSED** (8/8) | Direct in-process async client, zero loopback socket dependencies |
+| `tests/test_circuit.py` | Circuit breaker state machine (Closed, Open, Half-Open) | **PASSED** (5/5) | Failure count trip, reset on success, probe rate limiting |
+| `tests/test_cli.py` | Command line arguments, output formatting | **PASSED** (6/6) | CLI contracts verified |
+| `tests/test_events.py` | SSE EventBus fanout, drop-oldest buffer behavior | **PASSED** (3/3) | Verified with sync DirectLoop adapter |
 | `tests/test_files_api.py` | Disk file listing, search, safe deletion, file launching, temp cleanup, traversal guards, index compliance | **PASSED** (10/10) | Verified all file endpoints and security bounds |
-| `tests/test_utils.py` | String sanitization, duration formatting, human bytes, error classification | **PASSED** (13/13) | Core utilities verified |
 | `tests/test_formats.py` | Audio format selector, container selection, quality sorting | **PASSED** (8/8) | Format selection validated |
-| `tests/test_security.py` | URL host validation, SSRF checks, path traversal guards | **PASSED** (6/6) | Security boundaries verified |
-| `tests/test_cli.py` | Command line arguments, output formatting | **PASSED** (5/5) | CLI contracts verified |
-| `tests/test_resilience.py` | Circuit breaker, error handling | **PASSED** (3/3) | Fault tolerance validated |
 | `tests/test_manager.py` | Job queueing, worker execution, state transitions | **PASSED** (8/8) | Real JobManager tested |
-| **Total Verified** | **Core logic, security, files & cleanup API, formats, and queue manager** | **53 PASSED** | **100% Pass Rate** |
+| `tests/test_ratelimit.py` | Sliding window rate limiting, per-client tracking, concurrency, memory pruning | **PASSED** (7/7) | Quota enforcement & key bounding verified |
+| `tests/test_resilience.py` | Circuit breaker, error handling | **PASSED** (3/3) | Fault tolerance validated |
+| `tests/test_security.py` | URL host validation, SSRF checks, path traversal guards | **PASSED** (6/6) | Security boundaries verified |
+| `tests/test_store_pool.py` | SQLite connection pooling, concurrent read/write transactions | **PASSED** (2/2) | Multi-threaded worker pool verified |
+| `tests/test_utils.py` | String sanitization, duration formatting, human bytes, error classification | **PASSED** (13/13) | Core utilities verified |
+| `tests/test_watchdog.py` | Hung download worker detection and automatic cancellation | **PASSED** (3/3) | Wall-clock deadline enforcement verified |
+| **Total Verified** | **All architectural modules, API routes, security, files & concurrency** | **82 PASSED** | **100% Pass Rate (82/82)** |
+
+---
+
+## 5. Architecture & Performance Overhaul (Plan Implementation)
+
+Following the specification in `docs/architecture-performance-plan.md`, the core system architecture was upgraded across all 12 key resilience and performance pillars:
+
+1. **Dedicated Probe Pool (`app/api.py`)**:
+   - Isolated blocking `yt-dlp` probe operations into `_probe_executor` (ThreadPoolExecutor with max 4-8 workers).
+   - Starlette's general worker pool is no longer starved during heavy playlist probing.
+2. **Download Watchdog (`app/manager.py`)**:
+   - `_Watchdog` daemon monitors all active download items against `settings.download_timeout`.
+   - Hung items with no progress for `> download_timeout` seconds have their cancellation tokens automatically tripped, unblocking worker slots.
+3. **Sliding-Window Rate Limiter (`app/ratelimit.py`)**:
+   - In-memory sliding-window counter keyed by client IP address.
+   - Enforces `TT_RATE_LIMIT_RPM` on mutating endpoints (`/api/probe`, `/api/jobs`, `/api/cookies`).
+   - Memory bounded with `_prune_stale()` when keys reach `max_keys` (5,000 unique IPs).
+4. **Three-State Circuit Breaker (`app/circuit.py`)**:
+   - Tracks upstream service failures (`CLOSED -> OPEN -> HALF_OPEN -> CLOSED`).
+   - Trips after `circuit_breaker_threshold` consecutive failures, failing fast without hammering YouTube.
+   - Recovers after `circuit_breaker_recovery` seconds with limited probe attempts.
+5. **SQLite Connection Pooling & Fine-Grained Locking (`app/store.py`)**:
+   - Replaced single SQLite connection with thread-safe queue pool (`_POOL_SIZE = 4`) and WAL mode (`journal_mode=WAL`, `synchronous=NORMAL`).
+   - Fine-grained `_write_lock` serializes SQLite writes while concurrent threads execute read operations in parallel without blocking.
+   - `_release()` discards burst connections exceeding pool capacity to prevent memory leaks.
+6. **DNS LRU Cache (`app/security.py`)**:
+   - Replaced full dictionary clear with `OrderedDict` LRU eviction capped at 512 entries, eliminating thundering herd DNS spikes.
+7. **Configurable Probe Cache Size (`app/config.py` & `app/youtube.py`)**:
+   - Configurable probe cache size (`settings.probe_cache_size`, default 256).
+8. **Enhanced Health & Observability (`app/api.py`)**:
+   - `/api/health` reports system health, active download counts, total jobs, and live circuit breaker state (`closed`, `open`, `half_open`, `disabled`).
+9. **Graceful Process Shutdown (`app/manager.py` & `app/main.py`)**:
+   - FastAPI lifespan handles `SIGTERM` / `SIGINT` with a 10-second drain window, signaling active download cancellation tokens, shutting down probe pool, and cleanly closing database connections.
+10. **Batched Progress Persistence (`app/manager.py`)**:
+    - `_ProgressFlusher` batches high-frequency item progress updates and flushes them to SQLite every 3 seconds, reducing disk I/O under multi-worker loads.
+11. **Structured Logging (`app/main.py`)**:
+    - Centralized logging configuration with consistent date-time format, level controls, and suppression of noisy uvicorn access logs.
+12. **Exponential Backoff with Jitter (`app/manager.py`)**:
+    - Retry logic implements full jitter: `uniform(0.5, min(cap, base * 2^attempt))` to prevent thundering herd retries against upstream rate limits.
+
 

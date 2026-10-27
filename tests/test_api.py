@@ -28,7 +28,8 @@ def _fake_run(settings):
 
 def test_health_system_and_static(settings):
     with TestClient(create_app(settings)) as client:
-        assert client.get("/api/health").json() == {"status": "ok"}
+        health_resp = client.get("/api/health").json()
+        assert health_resp.get("status") == "ok"
         info = client.get("/api/system").json()
         assert info["app"] == "TurboTube"
         assert info["download_dir"] == str(settings.download_path)

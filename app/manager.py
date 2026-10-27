@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 import uuid
@@ -11,6 +12,7 @@ from typing import Any
 
 from yt_dlp.utils import DownloadCancelled
 
+from .circuit import CircuitBreaker
 from .config import PROJECT_ROOT, Settings
 from .events import EventBus
 from .models import DownloadOptions, SelectedEntry
@@ -67,6 +69,79 @@ def _new_id() -> str:
 def _retryable(message: str) -> bool:
     lowered = message.lower()
     return not any(marker in lowered for marker in _FATAL_MARKERS)
+
+
+def _backoff_delay(attempt: int, base: float = 2.0, cap: float = 60.0) -> float:
+    """Exponential backoff with full jitter: uniform [0, min(cap, base * 2^attempt)]."""
+    delay = min(cap, base * (2**attempt))
+    return random.uniform(0.5, delay)
+
+
+class _Watchdog(threading.Thread):
+    """Daemon thread that cancels items exceeding their wall-clock deadline."""
+
+    def __init__(self, manager: JobManager, interval: float = 15.0) -> None:
+        super().__init__(daemon=True, name="tt-watchdog")
+        self._manager = manager
+        self._interval = interval
+        self._stop = threading.Event()
+
+    def run(self) -> None:
+        while not self._stop.wait(self._interval):
+            timeout = getattr(self._manager.settings, "download_timeout", 0)
+            if timeout <= 0:
+                continue
+            now = time.time()
+            with self._manager._lock:
+                for job in self._manager._jobs.values():
+                    for item in job.items:
+                        if item.status in ACTIVE and item.attempts > 0:
+                            elapsed = now - item.updated_at
+                            if elapsed > timeout:
+                                log.warning(
+                                    "Watchdog: item %s stale for %.0fs (limit %ds), cancelling",
+                                    item.id,
+                                    elapsed,
+                                    timeout,
+                                )
+                                item.cancel.set()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+class _ProgressFlusher(threading.Thread):
+    """Batches progress updates into a single DB write periodically."""
+
+    def __init__(self, manager: JobManager, interval: float = 3.0) -> None:
+        super().__init__(daemon=True, name="tt-flush")
+        self._manager = manager
+        self._interval = interval
+        self._stop = threading.Event()
+        self._dirty: dict[str, ItemState] = {}
+        self._dirty_lock = threading.Lock()
+
+    def mark_dirty(self, item: ItemState) -> None:
+        with self._dirty_lock:
+            self._dirty[item.id] = item
+
+    def run(self) -> None:
+        while not self._stop.wait(self._interval):
+            self.flush()
+
+    def flush(self) -> None:
+        with self._dirty_lock:
+            items = list(self._dirty.values())
+            self._dirty.clear()
+        if items:
+            try:
+                self._manager.store.save_items([i.to_store() for i in items])
+            except Exception:
+                log.exception("Batch progress flush failed")
+
+    def stop(self) -> None:
+        self._stop.set()
+        self.flush()
 
 
 @dataclass
@@ -217,6 +292,23 @@ class JobManager:
         self._logs_dir = settings.data_path / "logs"
         self._load_history()
 
+        # Circuit breaker
+        self._breaker: CircuitBreaker | None = None
+        cb_threshold = getattr(settings, "circuit_breaker_threshold", 0)
+        if cb_threshold > 0:
+            self._breaker = CircuitBreaker(
+                failure_threshold=cb_threshold,
+                recovery_timeout=float(getattr(settings, "circuit_breaker_recovery", 60)),
+            )
+
+        # Watchdog & background progress flusher
+        self._watchdog = _Watchdog(self)
+        if getattr(settings, "download_timeout", 0) > 0:
+            self._watchdog.start()
+
+        self._flusher = _ProgressFlusher(self)
+        self._flusher.start()
+
     # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
@@ -289,6 +381,8 @@ class JobManager:
                 for item in job.items:
                     if item.status in ACTIVE:
                         item.cancel.set()
+        self._watchdog.stop()
+        self._flusher.stop()
         self._executor.shutdown(wait=False, cancel_futures=True)
         log.info("Download manager stopped")
 
@@ -447,6 +541,16 @@ class JobManager:
             self._recompute_status(job)
             return
 
+        # Check circuit breaker before starting work
+        if self._breaker and not self._breaker.allow_request():
+            self._set_status(
+                item,
+                "failed",
+                error="Circuit breaker OPEN — upstream failures detected. Retrying shortly.",
+            )
+            self._recompute_status(job)
+            return
+
         with self._lock:
             item.status = "running"
             item.attempts += 1
@@ -461,7 +565,7 @@ class JobManager:
         self._recompute_status(job, persist=False)
 
         attempts = 0
-        max_attempts = 2
+        max_attempts = max(2, getattr(self.settings, "retries", 3) + 1)
         while attempts < max_attempts and not self._closed:
             attempts += 1
             info: dict[str, Any] | None = None
@@ -486,15 +590,23 @@ class JobManager:
                     self._set_status(item, "cancelled", error="Cancelled")
                     break
                 if attempts < max_attempts and _retryable(message):
-                    self._log_line(item, f"Transient failure, retrying ({attempts}/{max_attempts - 1})")
+                    delay = _backoff_delay(attempts - 1)
+                    self._log_line(
+                        item,
+                        f"Transient failure, retry {attempts}/{max_attempts - 1} in {delay:.1f}s",
+                    )
                     self._set_status(item, "running", error=f"Retrying: {message[:180]}")
-                    if item.cancel.wait(2.0):
+                    if item.cancel.wait(delay):
                         self._set_status(item, "cancelled", error="Cancelled")
                         break
                     continue
+                if self._breaker:
+                    self._breaker.record_failure()
                 self._set_status(item, "failed", error=message)
                 break
             else:
+                if self._breaker:
+                    self._breaker.record_success()
                 path = extract_output_path(info, self.settings.download_path)
                 size = path.stat().st_size if path else 0
                 with self._lock:
@@ -564,7 +676,7 @@ class JobManager:
                 self._emit_item(item)
                 self._emit_job(job)
             if persist:
-                self._persist_items([item])
+                self._flusher.mark_dirty(item)
 
         elif status == "error":
             self._log_line(item, f"Downloader reported an error: {data.get('error', 'unknown')}")

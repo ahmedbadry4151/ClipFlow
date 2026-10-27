@@ -7,6 +7,7 @@ import logging
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,35 @@ from .youtube import (
 log = logging.getLogger("turbotube.api")
 router = APIRouter(prefix="/api")
 
+# Dedicated pool for blocking yt-dlp probes to isolate them from Starlette's threadpool
+_probe_executor: ThreadPoolExecutor | None = None
+
+
+def init_probe_pool(max_workers: int = 6) -> None:
+    """Create the probe pool once at app startup."""
+    global _probe_executor
+    if _probe_executor is None:
+        _probe_executor = ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="tt-probe"
+        )
+
+
+def shutdown_probe_pool() -> None:
+    """Shut down the probe pool on app shutdown."""
+    global _probe_executor
+    if _probe_executor is not None:
+        _probe_executor.shutdown(wait=False, cancel_futures=True)
+        _probe_executor = None
+
+
+async def _run_in_probe_pool(fn):
+    """Run `fn` in the dedicated probe pool, falling back to Starlette's threadpool."""
+    loop = asyncio.get_running_loop()
+    if _probe_executor is not None:
+        return await loop.run_in_executor(_probe_executor, fn)
+    return await run_in_threadpool(fn)
+
+
 _SSE_HEADERS = {
     "Cache-Control": "no-cache, no-transform",
     "Connection": "keep-alive",
@@ -54,8 +84,16 @@ def _sse(payload: dict[str, Any]) -> str:
 # system
 # ---------------------------------------------------------------------------
 @router.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health(request: Request) -> dict[str, Any]:
+    manager = _manager(request)
+    counts = manager.counts() if manager else {}
+    breaker = getattr(manager, "_breaker", None) if manager else None
+    return {
+        "status": "ok",
+        "active_downloads": counts.get("active", 0),
+        "total_jobs": counts.get("total", 0),
+        "circuit_breaker": breaker.state if breaker else "disabled",
+    }
 
 
 @router.get("/system")
@@ -105,7 +143,7 @@ async def probe(payload: ProbeRequest, request: Request) -> dict[str, Any]:
         )
 
     try:
-        return await run_in_threadpool(work)
+        return await _run_in_probe_pool(work)
     except UnsafeURLError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
@@ -131,7 +169,7 @@ async def create_job(payload: JobCreateRequest, request: Request) -> dict[str, A
         )
 
     try:
-        job = await run_in_threadpool(work)
+        job = await _run_in_probe_pool(work)
     except UnsafeURLError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SelectionError as exc:
@@ -341,3 +379,135 @@ async def upload_cookies(request: Request, file: UploadFile = File(...)) -> dict
     path = settings.cookies_path / f"{digest}.txt"
     path.write_bytes(content)
     return {"id": path.name, "label": f"cookies-{digest[:8]}", "path": str(path)}
+
+
+# ---------------------------------------------------------------------------
+# files & storage
+# ---------------------------------------------------------------------------
+@router.get("/files")
+async def list_files(
+    request: Request,
+    search: str | None = Query(default=None),
+) -> list[dict[str, Any]]:
+    settings = _settings(request)
+    download_dir = settings.download_path
+    if not download_dir.exists():
+        return []
+
+    files: list[dict[str, Any]] = []
+    query = search.strip().lower() if isinstance(search, str) and search.strip() else None
+    try:
+        for item in download_dir.iterdir():
+            if item.is_file():
+                if query and query not in item.name.lower():
+                    continue
+                stat = item.stat()
+                files.append(
+                    {
+                        "name": item.name,
+                        "size": stat.st_size,
+                        "extension": item.suffix.lstrip(".").lower(),
+                        "modified": stat.st_mtime,
+                        "path": str(item),
+                    }
+                )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not list files in %s: %s", download_dir, exc)
+        return []
+
+    files.sort(key=lambda f: f["modified"], reverse=True)
+    return files[:200]
+
+
+@router.delete("/files/{filename}")
+async def delete_file(filename: str, request: Request) -> dict[str, Any]:
+    settings = _settings(request)
+    target = settings.download_path / filename
+    try:
+        ensure_within(settings.download_path, target)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        target.unlink()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not delete file: {exc}") from exc
+
+    return {"deleted": True, "name": filename}
+
+
+@router.post("/files/{filename}/open")
+async def open_file(filename: str, request: Request) -> dict[str, Any]:
+    settings = _settings(request)
+    if not settings.enable_open_folder:
+        raise HTTPException(status_code=403, detail="Opening files is disabled")
+
+    target = settings.download_path / filename
+    try:
+        ensure_within(settings.download_path, target)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(target)])
+        else:
+            subprocess.Popen(["xdg-open", str(target)])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not open file: {exc}") from exc
+    return {"opened": filename}
+
+
+@router.post("/files/clean-temp")
+async def clean_temp_files(request: Request) -> dict[str, Any]:
+    settings = _settings(request)
+    download_dir = settings.download_path
+    if not download_dir.exists():
+        return {"cleaned": 0, "bytes_freed": 0}
+
+    temp_suffixes = {".part", ".ytdl", ".temp"}
+    cleaned_count = 0
+    bytes_freed = 0
+    try:
+        for item in download_dir.iterdir():
+            if item.is_file() and item.suffix.lower() in temp_suffixes:
+                size = item.stat().st_size
+                item.unlink()
+                cleaned_count += 1
+                bytes_freed += size
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Error cleaning temp files in %s: %s", download_dir, exc)
+        raise HTTPException(status_code=500, detail=f"Could not clean temp files: {exc}") from exc
+
+    return {"cleaned": cleaned_count, "bytes_freed": bytes_freed}
+
+
+@router.post("/folder/open")
+async def open_download_folder(request: Request) -> dict[str, Any]:
+    settings = _settings(request)
+    if not settings.enable_open_folder:
+        raise HTTPException(status_code=403, detail="Opening folders is disabled")
+
+    target = settings.download_path
+    if not target.exists():
+        target.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(target)])
+        else:
+            subprocess.Popen(["xdg-open", str(target)])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not open folder: {exc}") from exc
+    return {"opened": str(target)}
+

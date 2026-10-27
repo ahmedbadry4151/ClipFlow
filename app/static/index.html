@@ -1,15 +1,16 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <meta name="description" content="TurboTube — high-performance YouTube downloader with parallel playlists, quality control and live progress.">
-  <title>TurboTube — High-performance downloader</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="ClipFlow — Positivus-designed YouTube & media downloader with live multi-worker progress, format analysis, and library management powered by TurboTube.">
+  <title>ClipFlow — TurboTube Downloader</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <!-- Lucide-inspired SVG sprite -->
   <svg class="sprite" aria-hidden="true" focusable="false">
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
     <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="m5.6 5.6 2.8 2.8"/><path d="m15.6 15.6 2.8 2.8"/><path d="m18.4 5.6-2.8 2.8"/><path d="m8.4 15.6-2.8 2.8"/></symbol>
@@ -29,239 +30,846 @@
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5"/><path d="M12 17h.01"/></symbol>
     <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13h4l2 3h4l2-3h4"/><path d="M4 13 6 4h12l2 9v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="i-dashboard" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-files" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></symbol>
   </svg>
 
-  <header class="topbar">
-    <a class="brand" href="/" aria-label="TurboTube home">
-      <span class="brand-mark"><svg><use href="#i-bolt"/></svg></span>
-      <span class="brand-text">
-        <span class="brand-name">Turbo<span>Tube</span></span>
-        <span class="brand-sub">parallel downloader</span>
-      </span>
-    </a>
-    <div class="topbar-meta">
-      <span class="pill" id="pill-transport" title="Download transport"><span class="dot"></span> connecting…</span>
-      <span class="pill subtle" id="pill-ffmpeg" title="ffmpeg availability">ffmpeg …</span>
-      <span class="pill subtle dir" id="pill-dir" title="Download folder"><svg><use href="#i-folder"/></svg><span>downloads</span></span>
-      <span class="conn" id="conn" title="Live connection"><span></span></span>
-    </div>
-  </header>
-
-  <main class="layout">
-    <section class="panel composer" aria-labelledby="composer-title">
-      <div class="panel-head">
-        <div>
-          <h1 id="composer-title">New download</h1>
-          <p class="panel-sub">Pick a video or a playlist, choose the exact parts, then let the workers run.</p>
-        </div>
+  <div class="app-layout">
+    <!-- Desktop & Tablet Sidebar -->
+    <aside class="sidebar" id="sidebar" aria-label="Main Navigation">
+      <div class="sidebar-brand">
+        <a class="brand" href="/" aria-label="ClipFlow home">
+          <span class="brand-mark">
+            <svg><use href="#i-bolt"/></svg>
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">Clip<span>Flow</span></span>
+            <span class="brand-sub">powered by TurboTube</span>
+          </span>
+        </a>
       </div>
 
-      <form id="form" autocomplete="off" novalidate>
-        <label class="field-label" for="url">Media URL</label>
-        <div class="url-box">
-          <svg class="url-icon" aria-hidden="true"><use href="#i-film"/></svg>
-          <input id="url" name="url" type="url" inputmode="url" spellcheck="false"
-                 placeholder="https://www.youtube.com/watch?v=…  or  …/playlist?list=…" required>
-          <button type="button" id="paste" class="icon-btn" title="Paste and analyze" aria-label="Paste from clipboard">
-            <svg><use href="#i-paste"/></svg>
+      <nav class="sidebar-nav" role="tablist">
+        <button type="button" class="nav-item is-active" data-page="overview" role="tab" aria-selected="true">
+          <svg><use href="#i-dashboard"/></svg>
+          <span>Overview</span>
+        </button>
+        <button type="button" class="nav-item" data-page="downloads" role="tab" aria-selected="false">
+          <svg><use href="#i-download"/></svg>
+          <span>Downloads</span>
+          <span class="nav-badge" id="nav-queue-count">0</span>
+        </button>
+        <button type="button" class="nav-item" data-page="history" role="tab" aria-selected="false">
+          <svg><use href="#i-history"/></svg>
+          <span>History</span>
+        </button>
+        <button type="button" class="nav-item" data-page="files" role="tab" aria-selected="false">
+          <svg><use href="#i-files"/></svg>
+          <span>Files</span>
+        </button>
+        <button type="button" class="nav-item" data-page="settings" role="tab" aria-selected="false">
+          <svg><use href="#i-settings"/></svg>
+          <span>Settings</span>
+        </button>
+        <button type="button" class="nav-item" data-page="help" role="tab" aria-selected="false">
+          <svg><use href="#i-help"/></svg>
+          <span>Help</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-meta">
+          <span class="pill" id="pill-transport" title="Download transport"><span class="dot"></span> connecting…</span>
+          <span class="pill subtle" id="pill-ffmpeg" title="ffmpeg availability">ffmpeg …</span>
+        </div>
+        <div class="sidebar-actions">
+          <button type="button" class="theme-toggle-btn" id="theme-toggle" title="Toggle Light / Dark theme" aria-label="Toggle theme">
+            <svg class="theme-icon-sun"><use href="#i-sun"/></svg>
+            <svg class="theme-icon-moon"><use href="#i-moon"/></svg>
+            <span class="theme-label">Light Mode</span>
           </button>
         </div>
+      </div>
+    </aside>
 
-        <div class="actions-row">
-          <button type="button" id="analyze" class="btn ghost">
-            <svg><use href="#i-spark"/></svg><span>Analyze</span>
+    <!-- Main Content Container -->
+    <div class="main-container">
+      <!-- Top Navigation Bar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <button type="button" class="icon-btn mobile-menu-btn" id="mobile-nav-toggle" aria-label="Toggle navigation menu">
+            <svg><use href="#i-menu"/></svg>
           </button>
-          <button type="submit" id="submit" class="btn primary">
-            <svg><use href="#i-download"/></svg><span>Start download</span>
-          </button>
+          <div class="breadcrumbs">
+            <span class="crumb-app">ClipFlow</span>
+            <span class="crumb-separator">/</span>
+            <span class="crumb-current" id="page-title-text">Overview</span>
+          </div>
         </div>
 
-        <p class="hint" id="form-hint">Tip: <kbd>Ctrl</kbd> + <kbd>Enter</kbd> starts the download. Playlists are split into parallel jobs.</p>
+        <div class="topbar-meta">
+          <button type="button" class="pill subtle dir" id="pill-dir" title="Open download folder">
+            <svg><use href="#i-folder"/></svg><span>downloads</span>
+          </button>
+          <span class="conn" id="conn" title="Live connection"><span></span></span>
+          <button type="button" class="btn tiny primary new-download-btn" id="quick-new-btn">
+            <svg><use href="#i-spark"/></svg><span>New Download</span>
+          </button>
+        </div>
+      </header>
 
-        <div id="probe" class="probe hidden" aria-live="polite"></div>
+      <!-- Scrollable Main View Area -->
+      <main class="content-scroll" id="content-scroll">
 
-        <fieldset class="group" id="quality-group">
-          <legend>Quality</legend>
-          <div class="chips" id="quality-chips" role="radiogroup" aria-label="Video quality">
-            <button type="button" class="chip is-active" data-quality="best">Best</button>
-            <button type="button" class="chip" data-quality="2160">2160p</button>
-            <button type="button" class="chip" data-quality="1440">1440p</button>
-            <button type="button" class="chip" data-quality="1080">1080p</button>
-            <button type="button" class="chip" data-quality="720">720p</button>
-            <button type="button" class="chip" data-quality="480">480p</button>
-            <button type="button" class="chip" data-quality="360">360p</button>
-            <button type="button" class="chip" data-quality="worst">Lowest</button>
-          </div>
-          <div class="sub-row">
-            <label class="switch" title="Extract audio only">
-              <input type="checkbox" id="audioOnly">
-              <span class="track"></span>
-              <span>Audio only</span>
-            </label>
-            <label class="mini-field">Audio format
-              <select id="audioFormat">
-                <option value="mp3">MP3</option>
-                <option value="m4a">M4A</option>
-                <option value="opus">Opus</option>
-                <option value="aac">AAC</option>
-                <option value="flac">FLAC</option>
-                <option value="wav">WAV</option>
-                <option value="original">Original</option>
-              </select>
-            </label>
-            <label class="mini-field">Container
-              <select id="container">
-                <option value="mp4">MP4</option>
-                <option value="mkv">MKV</option>
-                <option value="webm">WebM</option>
-                <option value="original">Original</option>
-              </select>
-            </label>
-          </div>
-        </fieldset>
-
-        <details class="advanced" id="advanced">
-          <summary>
-            <span class="summary-title">Advanced options</span>
-            <span class="summary-sub">playlist parts · subtitles · network · cookies</span>
-            <svg class="chev"><use href="#i-chevron"/></svg>
-          </summary>
-
-          <div class="adv-body">
-            <div class="adv-section">
-              <h3><svg><use href="#i-list"/></svg>Playlist</h3>
-              <div class="adv-grid">
-                <label class="field">Mode
-                  <select id="mode">
-                    <option value="auto">Auto detect</option>
-                    <option value="video">Single video</option>
-                    <option value="playlist">Force playlist</option>
-                  </select>
-                </label>
-                <label class="field">Parts <span class="muted">e.g. 1-5,8,10-12</span>
-                  <input id="playlistItems" placeholder="all">
-                </label>
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="reverse">
-                  <span class="track"></span><span>Reverse order</span>
-                </label>
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="archive">
-                  <span class="track"></span><span>Skip archived videos</span>
-                </label>
-              </div>
+        <!-- ===================================================================
+             PAGE 1: OVERVIEW (Download Studio & Dashboard)
+             =================================================================== -->
+        <div class="page-view is-active" id="view-overview" role="tabpanel">
+          <section class="overview-hero">
+            <div class="page-header">
+              <div class="badge-tag">Studio v1.0</div>
+              <h1 class="page-title">Download Studio</h1>
+              <p class="page-desc">Inspect media streams, customize audio and video formats, and run multi-worker downloads.</p>
             </div>
 
-            <div class="adv-section">
-              <h3><svg><use href="#i-film"/></svg>Subtitles &amp; post-processing</h3>
-              <div class="adv-grid">
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="subtitles"><span class="track"></span><span>Download subtitles</span>
-                </label>
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="autoSubs"><span class="track"></span><span>Include auto-generated</span>
-                </label>
-                <label class="field">Languages <span class="muted">en,ar,…</span>
-                  <input id="subLangs" value="en">
-                </label>
-                <label class="field">SponsorBlock
-                  <select id="sponsorblock">
-                    <option value="off">Off</option>
-                    <option value="mark">Mark as chapters</option>
-                    <option value="remove">Remove segments</option>
-                  </select>
-                </label>
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="embedSubs" checked><span class="track"></span><span>Embed subtitles</span>
-                </label>
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="embedThumb" checked><span class="track"></span><span>Embed thumbnail</span>
-                </label>
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="embedMeta" checked><span class="track"></span><span>Embed metadata</span>
-                </label>
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="chapters"><span class="track"></span><span>Add chapters</span>
-                </label>
-              </div>
-            </div>
+            <!-- Composer Card -->
+            <div class="positivus-card composer-card">
+              <form id="form" autocomplete="off" novalidate>
+                <div class="field-header">
+                  <label class="field-label" for="url">Media or Playlist URL</label>
+                  <span class="hint-key">Tip: <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to download</span>
+                </div>
 
-            <div class="adv-section">
-              <h3><svg><use href="#i-wifi"/></svg>Network &amp; speed</h3>
-              <div class="adv-grid">
-                <label class="switch adv-switch">
-                  <input type="checkbox" id="useAria2" checked><span class="track"></span><span>aria2c acceleration</span>
-                </label>
-                <label class="field">Fragments <span class="muted">parallel chunks</span>
-                  <input id="fragments" type="number" min="1" max="64" placeholder="16">
-                </label>
-                <label class="field">Rate limit <span class="muted">e.g. 20M</span>
-                  <input id="rateLimit" placeholder="unlimited">
-                </label>
-                <label class="field">Proxy
-                  <input id="proxy" placeholder="socks5://host:port">
-                </label>
-                <label class="field">Clip section <span class="muted">00:30-02:10</span>
-                  <input id="section" placeholder="full video">
-                </label>
-              </div>
-            </div>
+                <div class="url-box">
+                  <svg class="url-icon" aria-hidden="true"><use href="#i-film"/></svg>
+                  <input id="url" name="url" type="url" inputmode="url" spellcheck="false"
+                         placeholder="https://www.youtube.com/watch?v=… or playlist link" required>
+                  <button type="button" id="clear-url" class="icon-btn clear-btn hidden" title="Clear URL" aria-label="Clear URL">
+                    <svg><use href="#i-x"/></svg>
+                  </button>
+                  <button type="button" id="paste" class="btn-paste" title="Paste from clipboard" aria-label="Paste from clipboard">
+                    <svg><use href="#i-paste"/></svg><span>Paste</span>
+                  </button>
+                </div>
 
-            <div class="adv-section">
-              <h3><svg><use href="#i-key"/></svg>Access</h3>
-              <div class="adv-grid">
-                <label class="field span-2">Cookie file <span class="muted">uploaded id or local path</span>
-                  <div class="inline-field">
-                    <input id="cookieFile" placeholder="cookies export (optional)">
-                    <label class="btn tiny ghost file-btn" for="cookieUpload">Upload</label>
-                    <input id="cookieUpload" type="file" accept=".txt,text/plain" hidden>
+                <div class="actions-row">
+                  <button type="button" id="analyze" class="btn secondary">
+                    <svg><use href="#i-spark"/></svg><span>Analyze Media</span>
+                  </button>
+                  <button type="submit" id="submit" class="btn primary">
+                    <svg><use href="#i-download"/></svg><span>Start Download</span>
+                  </button>
+                </div>
+
+                <p class="hint" id="form-hint">Supported sources: YouTube, Vimeo, SoundCloud, TikTok, Reddit, and 1000+ sources via yt-dlp.</p>
+
+                <!-- Media Probe / Video Preview -->
+                <div id="probe" class="probe hidden" aria-live="polite"></div>
+
+                <!-- Quality Selection -->
+                <fieldset class="group" id="quality-group">
+                  <legend>Quality Preset</legend>
+                  <div class="chips" id="quality-chips" role="radiogroup" aria-label="Video quality">
+                    <button type="button" class="chip is-active" data-quality="best">Best Quality</button>
+                    <button type="button" class="chip" data-quality="2160">4K (2160p)</button>
+                    <button type="button" class="chip" data-quality="1440">2K (1440p)</button>
+                    <button type="button" class="chip" data-quality="1080">1080p FHD</button>
+                    <button type="button" class="chip" data-quality="720">720p HD</button>
+                    <button type="button" class="chip" data-quality="480">480p</button>
+                    <button type="button" class="chip" data-quality="360">360p</button>
+                    <button type="button" class="chip" data-quality="worst">Lowest</button>
                   </div>
+                  <div class="sub-row">
+                    <label class="switch" title="Extract audio only">
+                      <input type="checkbox" id="audioOnly">
+                      <span class="track"></span>
+                      <span class="switch-text">Audio only</span>
+                    </label>
+                    <label class="mini-field">Audio format
+                      <select id="audioFormat">
+                        <option value="mp3">MP3</option>
+                        <option value="m4a">M4A</option>
+                        <option value="opus">Opus</option>
+                        <option value="aac">AAC</option>
+                        <option value="flac">FLAC</option>
+                        <option value="wav">WAV</option>
+                        <option value="original">Original</option>
+                      </select>
+                    </label>
+                    <label class="mini-field">Container
+                      <select id="container">
+                        <option value="mp4">MP4</option>
+                        <option value="mkv">MKV</option>
+                        <option value="webm">WebM</option>
+                        <option value="original">Original</option>
+                      </select>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <!-- Advanced Accordion -->
+                <details class="advanced" id="advanced">
+                  <summary>
+                    <span class="summary-title">Advanced Parameters</span>
+                    <span class="summary-sub">playlist range · subtitles · aria2 · proxy · cookies</span>
+                    <svg class="chev"><use href="#i-chevron"/></svg>
+                  </summary>
+
+                  <div class="adv-body">
+                    <div class="adv-section">
+                      <h3><svg><use href="#i-list"/></svg>Playlist Range</h3>
+                      <div class="adv-grid">
+                        <label class="field">Mode
+                          <select id="mode">
+                            <option value="auto">Auto detect</option>
+                            <option value="video">Single video</option>
+                            <option value="playlist">Force playlist</option>
+                          </select>
+                        </label>
+                        <label class="field">Parts <span class="muted">e.g. 1-5,8,10-12</span>
+                          <input id="playlistItems" placeholder="all">
+                        </label>
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="reverse">
+                          <span class="track"></span><span>Reverse order</span>
+                        </label>
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="archive">
+                          <span class="track"></span><span>Skip archived videos</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="adv-section">
+                      <h3><svg><use href="#i-film"/></svg>Subtitles &amp; Media Extras</h3>
+                      <div class="adv-grid">
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="subtitles"><span class="track"></span><span>Download subtitles</span>
+                        </label>
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="autoSubs"><span class="track"></span><span>Include auto-generated</span>
+                        </label>
+                        <label class="field">Languages <span class="muted">en,ar,…</span>
+                          <input id="subLangs" value="en">
+                        </label>
+                        <label class="field">SponsorBlock
+                          <select id="sponsorblock">
+                            <option value="off">Off</option>
+                            <option value="mark">Mark as chapters</option>
+                            <option value="remove">Remove segments</option>
+                          </select>
+                        </label>
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="embedSubs" checked><span class="track"></span><span>Embed subtitles</span>
+                        </label>
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="embedThumb" checked><span class="track"></span><span>Embed thumbnail</span>
+                        </label>
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="embedMeta" checked><span class="track"></span><span>Embed metadata</span>
+                        </label>
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="chapters"><span class="track"></span><span>Add chapters</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="adv-section">
+                      <h3><svg><use href="#i-wifi"/></svg>Network &amp; Acceleration</h3>
+                      <div class="adv-grid">
+                        <label class="switch adv-switch">
+                          <input type="checkbox" id="useAria2" checked><span class="track"></span><span>aria2c acceleration</span>
+                        </label>
+                        <label class="field">Fragments <span class="muted">parallel chunks</span>
+                          <input id="fragments" type="number" min="1" max="64" placeholder="16">
+                        </label>
+                        <label class="field">Rate limit <span class="muted">e.g. 20M</span>
+                          <input id="rateLimit" placeholder="unlimited">
+                        </label>
+                        <label class="field">Proxy
+                          <input id="proxy" placeholder="socks5://host:port">
+                        </label>
+                        <label class="field">Clip section <span class="muted">00:30-02:10</span>
+                          <input id="section" placeholder="full video">
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="adv-section">
+                      <h3><svg><use href="#i-key"/></svg>Authentication &amp; Cookies</h3>
+                      <div class="adv-grid">
+                        <label class="field span-2">Cookie file <span class="muted">uploaded id or local path</span>
+                          <div class="inline-field">
+                            <input id="cookieFile" placeholder="cookies export (optional)">
+                            <label class="btn tiny secondary file-btn" for="cookieUpload">Upload</label>
+                            <input id="cookieUpload" type="file" accept=".txt,text/plain" hidden>
+                          </div>
+                        </label>
+                        <label class="field">Browser cookies
+                          <select id="browserCookies">
+                            <option value="">None</option>
+                            <option value="chrome">Chrome</option>
+                            <option value="edge">Edge</option>
+                            <option value="firefox">Firefox</option>
+                            <option value="brave">Brave</option>
+                            <option value="opera">Opera</option>
+                            <option value="vivaldi">Vivaldi</option>
+                            <option value="chromium">Chromium</option>
+                          </select>
+                        </label>
+                      </div>
+                      <p class="note">Cookies are required for age-restricted, members-only, or bot-flagged videos. Files stored safely in <code>data/cookies/</code>.</p>
+                    </div>
+                  </div>
+                </details>
+              </form>
+            </div>
+          </section>
+
+          <!-- 4 Summary Metric Cards (Positivus Style) -->
+          <section class="overview-stats">
+            <div class="stat-card stat-lime">
+              <div class="stat-icon"><svg><use href="#i-download"/></svg></div>
+              <div class="stat-content">
+                <span class="stat-label">Active Downloads</span>
+                <span class="stat-val" id="stat-active">0</span>
+              </div>
+              <span class="stat-pill">live</span>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-icon"><svg><use href="#i-check"/></svg></div>
+              <div class="stat-content">
+                <span class="stat-label">Completed Jobs</span>
+                <span class="stat-val" id="stat-completed">0</span>
+              </div>
+              <span class="stat-pill subtle">ready</span>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-icon"><svg><use href="#i-alert"/></svg></div>
+              <div class="stat-content">
+                <span class="stat-label">Failed Jobs</span>
+                <span class="stat-val" id="stat-failed">0</span>
+              </div>
+              <span class="stat-pill warn">retriable</span>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-icon"><svg><use href="#i-dashboard"/></svg></div>
+              <div class="stat-content">
+                <span class="stat-label">Total Processed</span>
+                <span class="stat-val" id="stat-total">0</span>
+              </div>
+              <span class="stat-pill subtle">all time</span>
+            </div>
+          </section>
+
+          <!-- Active Spotlight Card -->
+          <section class="overview-spotlight hidden" id="overview-spotlight">
+            <div class="spotlight-header">
+              <div class="spotlight-title">
+                <span class="pulse-indicator"></span>
+                <span>Active Download in Progress</span>
+              </div>
+              <button type="button" class="btn tiny ghost" id="spotlight-view-queue">Go to Queue &rarr;</button>
+            </div>
+            <div class="spotlight-body" id="spotlight-content">
+              <!-- Dynamically populated -->
+            </div>
+          </section>
+
+          <!-- Recent Activity Section -->
+          <section class="overview-recent">
+            <div class="section-head">
+              <div>
+                <h2 class="section-title">Recent Activity</h2>
+                <p class="section-sub">Latest downloads submitted to ClipFlow.</p>
+              </div>
+              <button type="button" class="btn tiny ghost" id="recent-view-all">View All Downloads &rarr;</button>
+            </div>
+            <div class="recent-list" id="overview-recent-list">
+              <!-- Dynamically populated -->
+            </div>
+          </section>
+
+          <!-- Quick Navigation Links (Section 4.1 Spec) -->
+          <section class="overview-quick-links">
+            <div class="quick-link-card" id="quick-to-downloads" role="button" tabindex="0">
+              <div class="quick-link-icon"><svg><use href="#i-download"/></svg></div>
+              <div class="quick-link-content">
+                <span class="quick-link-title">Queue Manager</span>
+                <span class="quick-link-sub">Inspect active workers &amp; download speeds</span>
+              </div>
+              <span class="quick-link-arrow">&rarr;</span>
+            </div>
+            <div class="quick-link-card" id="quick-to-history" role="button" tabindex="0">
+              <div class="quick-link-icon"><svg><use href="#i-history"/></svg></div>
+              <div class="quick-link-content">
+                <span class="quick-link-title">Job Archives</span>
+                <span class="quick-link-sub">Browse past records &amp; retry failed jobs</span>
+              </div>
+              <span class="quick-link-arrow">&rarr;</span>
+            </div>
+            <div class="quick-link-card" id="quick-to-files" role="button" tabindex="0">
+              <div class="quick-link-icon"><svg><use href="#i-files"/></svg></div>
+              <div class="quick-link-content">
+                <span class="quick-link-title">Output Files</span>
+                <span class="quick-link-sub">Manage saved videos &amp; audio on disk</span>
+              </div>
+              <span class="quick-link-arrow">&rarr;</span>
+            </div>
+          </section>
+        </div>
+
+        <!-- ===================================================================
+             PAGE 2: DOWNLOADS (Queue & Active Tasks)
+             =================================================================== -->
+        <div class="page-view" id="view-downloads" role="tabpanel">
+          <section class="page-header queue-page-header">
+            <div>
+              <div class="badge-tag">Queue Manager</div>
+              <h1 class="page-title">Downloads <span class="count-pill" id="queue-count">0</span></h1>
+              <p class="page-desc">Real-time progress streamed directly from download workers.</p>
+            </div>
+            <div class="queue-header-actions">
+              <button type="button" id="clear-finished" class="btn secondary" title="Remove finished jobs from the queue (files stay on disk)">
+                <svg><use href="#i-check"/></svg><span>Clear Finished</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- Queue Filters and Search -->
+          <section class="toolbar-card positivus-card">
+            <div class="filter-tabs" role="tablist" id="queue-filters">
+              <button type="button" class="filter-tab is-active" data-filter="all">All Jobs</button>
+              <button type="button" class="filter-tab" data-filter="running">Active</button>
+              <button type="button" class="filter-tab" data-filter="queued">Queued</button>
+              <button type="button" class="filter-tab" data-filter="completed">Completed</button>
+              <button type="button" class="filter-tab" data-filter="failed">Failed</button>
+            </div>
+            <div class="toolbar-search">
+              <svg><use href="#i-search"/></svg>
+              <input type="search" id="queue-search" placeholder="Filter by title or ID…">
+            </div>
+          </section>
+
+          <!-- Job Cards List -->
+          <div id="jobs" class="jobs-list" aria-live="polite"></div>
+
+          <!-- Empty State -->
+          <div id="empty" class="empty-state">
+            <div class="empty-art">
+              <svg><use href="#i-inbox"/></svg>
+            </div>
+            <h3 class="empty-title">No downloads in queue</h3>
+            <p class="empty-desc">Paste a media or playlist link in the Overview studio to start downloading with parallel workers.</p>
+            <button type="button" class="btn primary" id="empty-new-btn">
+              <svg><use href="#i-spark"/></svg><span>Paste a Link</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ===================================================================
+             PAGE 3: HISTORY (Completed & Historical Downloads)
+             =================================================================== -->
+        <div class="page-view" id="view-history" role="tabpanel">
+          <section class="page-header">
+            <div>
+              <div class="badge-tag">Archives</div>
+              <h1 class="page-title">Download History</h1>
+              <p class="page-desc">Persistent record of past downloads. Removing a record leaves output files intact.</p>
+            </div>
+          </section>
+
+          <section class="toolbar-card positivus-card">
+            <div class="filter-tabs" id="history-filters">
+              <button type="button" class="filter-tab is-active" data-history-filter="all">All History</button>
+              <button type="button" class="filter-tab" data-history-filter="completed">Completed</button>
+              <button type="button" class="filter-tab" data-history-filter="failed">Failed</button>
+            </div>
+            <div class="filter-tabs" id="history-format-filters">
+              <button type="button" class="filter-tab is-active" data-history-format="all">All Types</button>
+              <button type="button" class="filter-tab" data-history-format="video">Video</button>
+              <button type="button" class="filter-tab" data-history-format="audio">Audio</button>
+            </div>
+            <div class="toolbar-search">
+              <svg><use href="#i-search"/></svg>
+              <input type="search" id="history-search" placeholder="Search history by video title…">
+            </div>
+          </section>
+
+          <!-- History Table / Cards -->
+          <div class="history-table-container positivus-card" id="history-container">
+            <table class="history-table" id="history-table">
+              <thead>
+                <tr>
+                  <th>Video</th>
+                  <th>Format / Options</th>
+                  <th>Items / Size</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th class="th-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+            <div class="empty-state hidden" id="history-empty">
+              <div class="empty-art"><svg><use href="#i-history"/></svg></div>
+              <h3 class="empty-title">No download history</h3>
+              <p class="empty-desc">Completed and finished jobs will appear here automatically.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================================================================
+             PAGE 4: FILES (Output File Management)
+             =================================================================== -->
+        <div class="page-view" id="view-files" role="tabpanel">
+          <section class="page-header">
+            <div>
+              <div class="badge-tag">File System</div>
+              <h1 class="page-title">Output Files</h1>
+              <p class="page-desc">Safe local file management for your download destination.</p>
+            </div>
+            <div class="queue-header-actions">
+              <button type="button" id="btn-clean-temp-files" class="btn secondary" title="Remove leftover incomplete .part and .ytdl files">
+                <svg><use href="#i-trash"/></svg><span>Clean Temp Files</span>
+              </button>
+              <button type="button" id="btn-open-dir" class="btn secondary">
+                <svg><use href="#i-folder"/></svg><span>Open Folder in Explorer</span>
+              </button>
+              <button type="button" id="btn-refresh-files" class="btn ghost" title="Refresh files list">
+                <svg><use href="#i-refresh"/></svg><span>Refresh</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="toolbar-card positivus-card">
+            <div class="toolbar-search full-search">
+              <svg><use href="#i-search"/></svg>
+              <input type="search" id="files-search" placeholder="Search downloaded files…">
+            </div>
+            <div class="file-stats-summary" id="files-count-badge">0 files · 0 B total</div>
+          </section>
+
+          <div class="files-container positivus-card" id="files-container">
+            <div class="files-grid" id="files-grid">
+              <!-- Dynamically populated -->
+            </div>
+            <div class="empty-state hidden" id="files-empty">
+              <div class="empty-art"><svg><use href="#i-folder"/></svg></div>
+              <h3 class="empty-title">No files found</h3>
+              <p class="empty-desc">Completed media files saved to your download directory will be listed here.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================================================================
+             PAGE 5: SETTINGS (Preferences, Defaults & System)
+             =================================================================== -->
+        <div class="page-view" id="view-settings" role="tabpanel">
+          <section class="page-header">
+            <div>
+              <div class="badge-tag">Preferences</div>
+              <h1 class="page-title">Application Settings</h1>
+              <p class="page-desc">Customize theme appearance, download defaults, and engine configurations.</p>
+            </div>
+          </section>
+
+          <div class="settings-grid">
+            <!-- Appearance Card -->
+            <div class="positivus-card setting-card">
+              <div class="card-head">
+                <div class="card-head-icon"><svg><use href="#i-sun"/></svg></div>
+                <div>
+                  <h2 class="card-head-title">Theme &amp; Appearance</h2>
+                  <p class="card-head-sub">Choose your preferred visual aesthetic.</p>
+                </div>
+              </div>
+              <div class="theme-picker-group" role="radiogroup" aria-label="Visual theme">
+                <button type="button" class="theme-choice is-active" data-set-theme="light">
+                  <div class="theme-preview-box preview-light">
+                    <span class="preview-accent"></span>
+                  </div>
+                  <span class="theme-name">Positivus Light</span>
+                  <span class="theme-desc">High contrast, bold borders &amp; lime accents</span>
+                </button>
+                <button type="button" class="theme-choice" data-set-theme="dark">
+                  <div class="theme-preview-box preview-dark">
+                    <span class="preview-accent"></span>
+                  </div>
+                  <span class="theme-name">Neo Dark</span>
+                  <span class="theme-desc">Charcoal surfaces with vibrant lime highlights</span>
+                </button>
+                <button type="button" class="theme-choice" data-set-theme="system">
+                  <div class="theme-preview-box preview-system">
+                    <span class="preview-accent"></span>
+                  </div>
+                  <span class="theme-name">System (Auto)</span>
+                  <span class="theme-desc">Sync with OS light/dark scheme</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Download Defaults Card -->
+            <div class="positivus-card setting-card">
+              <div class="card-head">
+                <div class="card-head-icon"><svg><use href="#i-download"/></svg></div>
+                <div>
+                  <h2 class="card-head-title">Format Defaults</h2>
+                  <p class="card-head-sub">Pre-select format options for new downloads.</p>
+                </div>
+              </div>
+              <div class="settings-fields">
+                <label class="setting-field">
+                  <span class="label-text">Default Video Quality</span>
+                  <select id="pref-default-quality">
+                    <option value="best">Best Available</option>
+                    <option value="2160">2160p (4K)</option>
+                    <option value="1440">1440p (2K)</option>
+                    <option value="1080">1080p (FHD)</option>
+                    <option value="720">720p (HD)</option>
+                    <option value="480">480p (SD)</option>
+                  </select>
                 </label>
-                <label class="field">Browser cookies
-                  <select id="browserCookies">
-                    <option value="">None</option>
-                    <option value="chrome">Chrome</option>
-                    <option value="edge">Edge</option>
-                    <option value="firefox">Firefox</option>
-                    <option value="brave">Brave</option>
-                    <option value="opera">Opera</option>
-                    <option value="vivaldi">Vivaldi</option>
-                    <option value="chromium">Chromium</option>
+                <label class="setting-field">
+                  <span class="label-text">Default Container</span>
+                  <select id="pref-default-container">
+                    <option value="mp4">MP4 (Recommended)</option>
+                    <option value="mkv">MKV</option>
+                    <option value="webm">WebM</option>
+                    <option value="original">Original Stream</option>
+                  </select>
+                </label>
+                <label class="setting-field">
+                  <span class="label-text">Default Audio Format</span>
+                  <select id="pref-default-audio">
+                    <option value="mp3">MP3</option>
+                    <option value="m4a">M4A</option>
+                    <option value="flac">FLAC</option>
+                    <option value="opus">Opus</option>
                   </select>
                 </label>
               </div>
-              <p class="note">Cookies are required for age-restricted, private, or bot-flagged videos. The server stores uploads in <code>data/cookies/</code>.</p>
+            </div>
+
+            <!-- Queue & Concurrency Card (Section 4.5 Spec) -->
+            <div class="positivus-card setting-card">
+              <div class="card-head">
+                <div class="card-head-icon"><svg><use href="#i-bolt"/></svg></div>
+                <div>
+                  <h2 class="card-head-title">Queue &amp; Concurrency</h2>
+                  <p class="card-head-sub">Multi-worker behavior and queue lifecycle.</p>
+                </div>
+              </div>
+              <div class="settings-fields">
+                <label class="setting-field">
+                  <span class="label-text">Parallel Worker Concurrency</span>
+                  <select id="pref-concurrency">
+                    <option value="1">1 worker (Sequential)</option>
+                    <option value="2" selected>2 workers (Balanced)</option>
+                    <option value="4">4 workers (Fast)</option>
+                    <option value="8">8 workers (Maximum)</option>
+                  </select>
+                </label>
+                <label class="switch">
+                  <input type="checkbox" id="pref-auto-clear-finished">
+                  <span class="track"></span>
+                  <span class="switch-text">Auto-clear completed records on app start</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Storage & Paths Card -->
+            <div class="positivus-card setting-card">
+              <div class="card-head">
+                <div class="card-head-icon"><svg><use href="#i-folder"/></svg></div>
+                <div>
+                  <h2 class="card-head-title">Storage &amp; Destination</h2>
+                  <p class="card-head-sub">Output location and storage cleanup.</p>
+                </div>
+              </div>
+              <div class="storage-info-box">
+                <div class="storage-path-display">
+                  <span class="storage-path-label">Download Folder</span>
+                  <code id="settings-storage-path">downloads</code>
+                </div>
+                <div class="setting-actions">
+                  <button type="button" class="btn secondary" id="settings-btn-open-folder">
+                    <svg><use href="#i-folder"/></svg><span>Reveal in File Explorer</span>
+                  </button>
+                  <button type="button" class="btn ghost danger" id="settings-btn-clean-temp">
+                    <svg><use href="#i-trash"/></svg><span>Clean Temp Files (.part)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Privacy & API Access -->
+            <div class="positivus-card setting-card">
+              <div class="card-head">
+                <div class="card-head-icon"><svg><use href="#i-key"/></svg></div>
+                <div>
+                  <h2 class="card-head-title">Security &amp; API Key</h2>
+                  <p class="card-head-sub">Configure server authentication.</p>
+                </div>
+              </div>
+              <div class="settings-fields">
+                <label class="setting-field">
+                  <span class="label-text">API Key (optional)</span>
+                  <input type="password" id="settings-api-key" placeholder="Enter server API key if required">
+                </label>
+                <div class="setting-actions">
+                  <button type="button" class="btn secondary" id="btn-save-api-key">Save Key</button>
+                  <button type="button" class="btn ghost danger" id="btn-clear-local-data">Clear Local Cache</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- About & Engine Diagnostics -->
+            <div class="positivus-card setting-card full-span">
+              <div class="card-head">
+                <div class="card-head-icon"><svg><use href="#i-bolt"/></svg></div>
+                <div>
+                  <h2 class="card-head-title">Engine Diagnostics</h2>
+                  <p class="card-head-sub">System runtime versions and engine status.</p>
+                </div>
+              </div>
+              <div class="diag-grid">
+                <div class="diag-item">
+                  <span class="diag-label">Application</span>
+                  <span class="diag-value">ClipFlow 1.0.0 (TurboTube)</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">yt-dlp Engine</span>
+                  <span class="diag-value" id="diag-ytdlp">Detecting…</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">FFmpeg Encoder</span>
+                  <span class="diag-value" id="diag-ffmpeg">Detecting…</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">Aria2 Accelerator</span>
+                  <span class="diag-value" id="diag-aria2">Detecting…</span>
+                </div>
+              </div>
             </div>
           </div>
-        </details>
-      </form>
-    </section>
+        </div>
 
-    <section class="panel queue" aria-labelledby="queue-title">
-      <div class="panel-head queue-head">
-        <div>
-          <h2 id="queue-title">Queue <span class="count" id="queue-count">0</span></h2>
-          <p class="panel-sub" id="queue-sub">Live progress streamed from the download workers.</p>
+        <!-- ===================================================================
+             PAGE 6: HELP (Sources, Shortcuts, Troubleshooting)
+             =================================================================== -->
+        <div class="page-view" id="view-help" role="tabpanel">
+          <section class="page-header">
+            <div>
+              <div class="badge-tag">Documentation</div>
+              <h1 class="page-title">Help &amp; Troubleshooting</h1>
+              <p class="page-desc">Supported platforms, keyboard shortcuts, and troubleshooting common issues.</p>
+            </div>
+          </section>
+
+          <div class="help-sections">
+            <!-- Supported Sources -->
+            <div class="positivus-card help-card">
+              <h2 class="help-card-title"><svg><use href="#i-film"/></svg>Supported Sources</h2>
+              <p class="help-desc">ClipFlow supports over 1,000 video, audio, and streaming sites powered by the latest yt-dlp core engine.</p>
+              <div class="sources-tags">
+                <span class="source-tag">YouTube</span>
+                <span class="source-tag">Vimeo</span>
+                <span class="source-tag">SoundCloud</span>
+                <span class="source-tag">TikTok</span>
+                <span class="source-tag">Twitter / X</span>
+                <span class="source-tag">Reddit</span>
+                <span class="source-tag">Twitch Clips</span>
+                <span class="source-tag">Instagram</span>
+                <span class="source-tag">Facebook Watch</span>
+                <span class="source-tag">Bandcamp</span>
+                <span class="source-tag">Dailymotion</span>
+                <span class="source-tag">Mixcloud</span>
+              </div>
+            </div>
+
+            <!-- Troubleshooting -->
+            <div class="positivus-card help-card">
+              <h2 class="help-card-title"><svg><use href="#i-alert"/></svg>Troubleshooting Guide</h2>
+              <div class="faq-list">
+                <div class="faq-item">
+                  <h3 class="faq-q">Video requires login or age-verification</h3>
+                  <p class="faq-a">Upload your browser cookie file or select your browser under <strong>Advanced &rarr; Access</strong>. The server uses your exported Netscape cookies to access authorized content safely.</p>
+                </div>
+                <div class="faq-item">
+                  <h3 class="faq-q">Video and audio formats need merging</h3>
+                  <p class="faq-a">FFmpeg is required for remuxing high-definition video (1080p, 1440p, 4K) with separate audio streams. Ensure ffmpeg is in your system PATH.</p>
+                </div>
+                <div class="faq-item">
+                  <h3 class="faq-q">Download speeds are throttled</h3>
+                  <p class="faq-a">ClipFlow automatically enables aria2 multi-connection chunked acceleration. You can adjust fragments from 4 up to 32 in the Advanced settings.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Shortcuts -->
+            <div class="positivus-card help-card">
+              <h2 class="help-card-title"><svg><use href="#i-spark"/></svg>Keyboard Shortcuts</h2>
+              <div class="shortcuts-grid">
+                <div class="shortcut-row">
+                  <span>Start Download / Submit</span>
+                  <div class="keys"><kbd>Ctrl</kbd> + <kbd>Enter</kbd></div>
+                </div>
+                <div class="shortcut-row">
+                  <span>Focus URL Input</span>
+                  <div class="keys"><kbd>/</kbd></div>
+                </div>
+                <div class="shortcut-row">
+                  <span>Close Dialog / Modal</span>
+                  <div class="keys"><kbd>Esc</kbd></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Legal Notice -->
+            <div class="positivus-card help-card callout-card">
+              <h2 class="help-card-title"><svg><use href="#i-key"/></svg>Usage &amp; Access Compliance</h2>
+              <p class="help-desc">ClipFlow is designed for content the user owns, has express permission to download, or is authorized to access under applicable terms. DRM or encrypted access restrictions are not circumvented.</p>
+            </div>
+          </div>
         </div>
-        <div class="queue-actions">
-          <button type="button" id="clear-finished" class="btn tiny ghost" title="Remove finished jobs from the list (files stay on disk)">
-            <svg><use href="#i-check"/></svg><span>Clear finished</span>
-          </button>
-        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Reusable Confirmation Modal -->
+  <dialog class="positivus-dialog" id="confirm-modal">
+    <div class="dialog-box">
+      <div class="dialog-head">
+        <h3 class="dialog-title" id="confirm-title">Confirm Action</h3>
+        <button type="button" class="icon-btn" id="confirm-close" aria-label="Close dialog">
+          <svg><use href="#i-x"/></svg>
+        </button>
       </div>
-
-      <div id="jobs" class="jobs" aria-live="polite"></div>
-
-      <div id="empty" class="empty">
-        <div class="empty-art">
-          <svg><use href="#i-inbox"/></svg>
-        </div>
-        <h3>Nothing in the queue</h3>
-        <p>Paste a link above. Playlists can be split into parts and downloaded in parallel — each video gets its own worker and live progress bar.</p>
+      <p class="dialog-msg" id="confirm-msg">Are you sure you want to proceed?</p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" id="confirm-cancel">Cancel</button>
+        <button type="button" class="btn primary danger" id="confirm-ok">Confirm</button>
       </div>
-    </section>
-  </main>
+    </div>
+  </dialog>
 
+  <!-- Toast Notification Container -->
   <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
 
   <script src="/app.js" defer></script>

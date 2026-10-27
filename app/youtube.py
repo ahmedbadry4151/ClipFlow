@@ -553,7 +553,7 @@ def probe_media(
     if settings.probe_cache_ttl:
         with _PROBE_LOCK:
             _PROBE_CACHE[cache_key] = (now + settings.probe_cache_ttl, payload)
-            if len(_PROBE_CACHE) > 64:
+            while len(_PROBE_CACHE) > getattr(settings, "probe_cache_size", 256):
                 _PROBE_CACHE.popitem(last=False)
     return copy.deepcopy(payload)
 

@@ -4,6 +4,7 @@ import ipaddress
 import socket
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -24,8 +25,9 @@ _PRIVATE_NETWORKS = [
     ipaddress.ip_network("fe80::/10"),
 ]
 
-_DNS_CACHE: dict[str, tuple[float, list[str]]] = {}
+_DNS_CACHE: OrderedDict[str, tuple[float, list[str]]] = OrderedDict()
 _DNS_LOCK = threading.Lock()
+_DNS_MAX_ENTRIES = 512
 _DNS_TTL = 300.0
 
 
@@ -47,16 +49,19 @@ def _resolve(host: str) -> list[str]:
     now = time.monotonic()
     with _DNS_LOCK:
         cached = _DNS_CACHE.get(host)
-        if cached and cached[0] > now:
-            return cached[1]
+        if cached:
+            if cached[0] > now:
+                _DNS_CACHE.move_to_end(host)
+                return cached[1]
+            del _DNS_CACHE[host]
     try:
         infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         raise UnsafeURLError(f"Could not resolve host '{host}'") from exc
     addresses = sorted({info[4][0] for info in infos})
     with _DNS_LOCK:
-        if len(_DNS_CACHE) > 512:
-            _DNS_CACHE.clear()
+        while len(_DNS_CACHE) >= _DNS_MAX_ENTRIES:
+            _DNS_CACHE.popitem(last=False)
         _DNS_CACHE[host] = (now + _DNS_TTL, addresses)
     return addresses
 

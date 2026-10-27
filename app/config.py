@@ -38,15 +38,20 @@ class Settings(BaseSettings):
     aria2_connections: int = Field(default=16, ge=1, le=32)
     retries: int = Field(default=3, ge=0, le=20)
     socket_timeout: int = Field(default=20, ge=5, le=120)
+    download_timeout: int = Field(default=0, ge=0, le=86400)
+    circuit_breaker_threshold: int = Field(default=0, ge=0, le=50)
+    circuit_breaker_recovery: int = Field(default=60, ge=10, le=600)
 
     # --- behaviour ------------------------------------------------------
     probe_cache_ttl: int = Field(default=180, ge=0, le=3600)
+    probe_cache_size: int = Field(default=256, ge=1, le=2048)
     probe_max_entries: int = Field(default=1000, ge=1, le=10000)
     max_history: int = Field(default=200, ge=1, le=5000)
     enable_open_folder: bool = True
     auto_resume: bool = False
     allowed_hosts: str = ""
     allow_private_hosts: bool = False
+    rate_limit_rpm: int = Field(default=0, ge=0, le=1000)
 
     @field_validator("log_level")
     @classmethod

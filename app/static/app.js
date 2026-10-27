@@ -1,4 +1,4 @@
-/* TurboTube UI controller — no dependencies, no build step. */
+/* ClipFlow UI Controller — Positivus-Inspired Neo-Brutalist Downloader */
 "use strict";
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -6,16 +6,26 @@ const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selec
 
 const KEY_STORE = "tt_api_key";
 const PREFS_STORE = "tt_prefs_v1";
+const THEME_STORE = "clipflow_theme";
 const MAX_ENTRIES = 200;
 
 const state = {
+  currentPage: "overview",
+  theme: localStorage.getItem(THEME_STORE) || "light",
   jobs: new Map(),
+  files: [],
   probe: null,
   probeUrl: "",
   selected: new Set(),
   entryFilter: "",
   showAll: false,
   quality: "best",
+  queueFilter: "all",
+  queueSearch: "",
+  historyFilter: "all",
+  historyFormat: "all",
+  historySearch: "",
+  filesSearch: "",
   system: null,
   apiKey: localStorage.getItem(KEY_STORE) || "",
   es: null,
@@ -25,12 +35,22 @@ const state = {
   authPrompted: false,
 };
 
+function getThumbnail(job) {
+  if (job && job.thumbnail) return job.thumbnail;
+  const url = (job && job.url) || "";
+  const match = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+  if (match) {
+    return `https://img.youtube.com/vi/${match[1]}/mqdefault.jpg`;
+  }
+  return "";
+}
+
 const STATUS_LABELS = {
   queued: "Queued",
   running: "Running",
   downloading: "Downloading",
   processing: "Processing",
-  completed: "Done",
+  completed: "Completed",
   failed: "Failed",
   cancelled: "Cancelled",
   partial: "Partial",
@@ -96,6 +116,17 @@ function duration(seconds) {
                : `${minutes}:${String(secs).padStart(2, "0")}`;
 }
 
+function formatDate(timestamp) {
+  if (!timestamp) return "—";
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function baseName(path) {
   return String(path || "").split(/[\\/]/).filter(Boolean).pop() || "";
 }
@@ -127,6 +158,124 @@ function setLoading(button, loading, label) {
     if (!button.dataset.label) button.dataset.label = span.textContent;
     span.textContent = loading ? label : button.dataset.label;
   }
+}
+
+/* ----------------------------------------------------------- modal dialog */
+function confirmModal(title, message, okText = "Confirm", isDanger = true) {
+  return new Promise((resolve) => {
+    const dialog = $("#confirm-modal");
+    if (!dialog) {
+      resolve(window.confirm(message));
+      return;
+    }
+    $("#confirm-title").textContent = title;
+    $("#confirm-msg").textContent = message;
+    const okBtn = $("#confirm-ok");
+    okBtn.textContent = okText;
+    okBtn.className = isDanger ? "btn primary danger" : "btn primary";
+
+    const cleanUp = () => {
+      dialog.close();
+      dialog.removeEventListener("close", onCancel);
+      okBtn.removeEventListener("click", onOk);
+      $("#confirm-cancel").removeEventListener("click", onCancel);
+      $("#confirm-close").removeEventListener("click", onCancel);
+    };
+
+    const onOk = () => { cleanUp(); resolve(true); };
+    const onCancel = () => { cleanUp(); resolve(false); };
+
+    okBtn.addEventListener("click", onOk);
+    $("#confirm-cancel").addEventListener("click", onCancel);
+    $("#confirm-close").addEventListener("click", onCancel);
+    dialog.addEventListener("close", onCancel);
+
+    dialog.showModal();
+  });
+}
+
+/* ------------------------------------------------------------------ theme */
+function getEffectiveTheme(theme) {
+  if (theme === "system") {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return theme;
+}
+
+function applyTheme(theme) {
+  state.theme = theme;
+  const effective = getEffectiveTheme(theme);
+  document.documentElement.setAttribute("data-theme", effective);
+  localStorage.setItem(THEME_STORE, theme);
+
+  const toggleBtn = $("#theme-toggle");
+  if (toggleBtn) {
+    const label = toggleBtn.querySelector(".theme-label");
+    if (label) {
+      label.textContent = theme === "system"
+        ? `Auto (${effective === "dark" ? "Dark" : "Light"})`
+        : theme === "dark" ? "Dark Mode" : "Light Mode";
+    }
+  }
+
+  $$(".theme-choice").forEach((choice) => {
+    choice.classList.toggle("is-active", choice.dataset.setTheme === theme);
+  });
+}
+
+function toggleTheme() {
+  const next = state.theme === "light" ? "dark" : state.theme === "dark" ? "system" : "light";
+  applyTheme(next);
+}
+
+if (typeof window !== "undefined" && window.matchMedia) {
+  try {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (state.theme === "system") {
+        applyTheme("system");
+      }
+    });
+  } catch {
+    /* older matchMedia fallback */
+  }
+}
+
+/* ------------------------------------------------------------- navigation */
+function switchPage(pageId) {
+  state.currentPage = pageId;
+
+  // Update tabs
+  $$(".sidebar-nav .nav-item").forEach((btn) => {
+    const active = btn.dataset.page === pageId;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", String(active));
+  });
+
+  // Update views
+  $$(".page-view").forEach((view) => {
+    view.classList.toggle("is-active", view.id === `view-${pageId}`);
+  });
+
+  // Update breadcrumbs
+  const titleMap = {
+    overview: "Overview",
+    downloads: "Downloads",
+    history: "History",
+    files: "Files",
+    settings: "Settings",
+    help: "Help",
+  };
+  const title = titleMap[pageId] || "Overview";
+  const crumb = $("#page-title-text");
+  if (crumb) crumb.textContent = title;
+
+  // Close mobile sidebar if open
+  $("#sidebar")?.classList.remove("is-open");
+
+  // Page-specific initializers
+  if (pageId === "files") loadFiles();
+  if (pageId === "history") renderHistory();
+  if (pageId === "overview") updateOverviewWidgets();
 }
 
 /* -------------------------------------------------------------------- api */
@@ -178,6 +327,14 @@ function loadPrefs() {
   state.quality = prefs.quality || "best";
   applyQualityUI();
   syncAudioUI();
+
+  // Settings page format defaults
+  const prefQ = $("#pref-default-quality");
+  if (prefQ && prefs.quality) prefQ.value = prefs.quality;
+  const prefC = $("#pref-default-container");
+  if (prefC && prefs.container) prefC.value = prefs.container;
+  const prefA = $("#pref-default-audio");
+  if (prefA && prefs.audioFormat) prefA.value = prefs.audioFormat;
 }
 
 function savePrefs() {
@@ -190,7 +347,7 @@ function savePrefs() {
   try {
     localStorage.setItem(PREFS_STORE, JSON.stringify(prefs));
   } catch {
-    /* storage may be unavailable */
+    /* storage unavailable */
   }
 }
 
@@ -246,9 +403,12 @@ function applyQualityUI() {
 
 function syncAudioUI() {
   const audio = checked("audioOnly");
-  $("#quality-chips").classList.toggle("disabled", audio);
-  $("#container").disabled = audio;
-  $("#container").closest(".mini-field").style.opacity = audio ? "0.45" : "";
+  $("#quality-chips")?.classList.toggle("disabled", audio);
+  const container = $("#container");
+  if (container) {
+    container.disabled = audio;
+    container.closest(".mini-field").style.opacity = audio ? "0.45" : "";
+  }
 }
 
 function setQuality(quality) {
@@ -263,7 +423,7 @@ function renderSystem(system) {
   const transport = $("#pill-transport");
   const workers = system.max_concurrent_downloads;
   transport.className = "pill " + (system.aria2 ? "ok" : "warn");
-  transport.innerHTML = `<span class="dot"></span>${system.aria2 ? `aria2c · ${workers}× workers` : `native · ${workers}× workers`}`;
+  transport.innerHTML = `<span class="dot"></span>${system.aria2 ? `aria2c · ${workers}×` : `native · ${workers}×`}`;
   transport.title = system.aria2
     ? "aria2c multi-connection transport is active"
     : "aria2c not found — using yt-dlp's native transport";
@@ -273,9 +433,17 @@ function renderSystem(system) {
   ffmpeg.textContent = system.ffmpeg ? "ffmpeg ready" : "ffmpeg missing";
 
   const dir = $("#pill-dir");
-  dir.querySelector("span").textContent = baseName(system.download_dir) || "downloads";
-  dir.title = `Saving to ${system.download_dir}`;
-  dir.className = "pill subtle dir ok";
+  const folderName = baseName(system.download_dir) || "downloads";
+  dir.querySelector("span").textContent = folderName;
+  dir.title = `Saving to ${system.download_dir} (click to reveal)`;
+
+  const storagePathCode = $("#settings-storage-path");
+  if (storagePathCode) storagePathCode.textContent = system.download_dir;
+
+  // Diagnostics in Settings
+  if ($("#diag-ytdlp")) $("#diag-ytdlp").textContent = system.ytdlp || "v2026+";
+  if ($("#diag-ffmpeg")) $("#diag-ffmpeg").textContent = system.ffmpeg ? "Available & Configured" : "Not Found";
+  if ($("#diag-aria2")) $("#diag-aria2").textContent = system.aria2 ? "Active (Multi-Threaded)" : "Disabled";
 
   if (system.auth_required && !state.apiKey) {
     toast("This server requires an API key", "warn");
@@ -287,9 +455,11 @@ async function loadSystem() {
     renderSystem(await api("/api/system"));
   } catch (error) {
     const transport = $("#pill-transport");
-    transport.className = "pill err";
-    transport.innerHTML = `<span class="dot"></span>server offline`;
-    transport.title = error.message;
+    if (transport) {
+      transport.className = "pill err";
+      transport.innerHTML = `<span class="dot"></span>offline`;
+      transport.title = error.message;
+    }
   }
 }
 
@@ -297,16 +467,20 @@ async function loadSystem() {
 function renderProbeLoading() {
   const container = $("#probe");
   container.classList.remove("hidden");
-  container.innerHTML = `<div class="probe-loading"><span class="spinner"></span><span>Reading formats and playlist entries…</span></div>`;
+  container.innerHTML = `
+    <div class="probe-loading" style="display:flex; align-items:center; gap:12px; padding:16px;">
+      <svg class="loading-spin" style="animation: spin 1s linear infinite;"><use href="#i-refresh"/></svg>
+      <span>Analyzing media streams and permitted formats…</span>
+    </div>`;
 }
 
 function renderProbeError(message) {
   const container = $("#probe");
   container.classList.remove("hidden");
   container.innerHTML = `
-    <div class="probe-error">
+    <div class="probe-error" style="display:flex; align-items:center; gap:12px; padding:16px; color:var(--red);">
       ${icon("alert")}
-      <div><strong>Could not analyze this URL</strong>${esc(message)}</div>
+      <div><strong>Could not analyze this URL</strong><p style="font-size:13px; margin-top:4px;">${esc(message)}</p></div>
     </div>`;
 }
 
@@ -320,182 +494,125 @@ function renderProbe() {
   const probe = state.probe;
   const isPlaylist = probe.kind === "playlist";
   const thumb = probe.thumbnail
-    ? `<img src="${esc(probe.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-    : "";
-  const durationBadge = probe.duration ? `<span class="badge">${duration(probe.duration)}</span>` : "";
-  const live = ["is_live", "is_upcoming"].includes(probe.live_status)
-    ? `<span class="live">${probe.live_status === "is_live" ? "live" : "upcoming"}</span>`
-    : "";
+    ? `<img class="probe-thumb" src="${esc(probe.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    : `<div style="display:grid; place-items:center; height:100%;">${icon("film")}</div>`;
+  const durationBadge = probe.duration ? `<span class="probe-duration">${duration(probe.duration)}</span>` : "";
 
-  const metaParts = [];
-  if (probe.uploader) metaParts.push(esc(probe.uploader));
-  if (probe.duration) metaParts.push(duration(probe.duration));
-  if (isPlaylist) {
-    metaParts.push(`${probe.entry_count} video${probe.entry_count === 1 ? "" : "s"}`);
-    if (probe.entries.length < probe.entry_count) metaParts.push(`${probe.entries.length} listed`);
-  } else {
-    metaParts.push(`${(probe.qualities || []).length || "—"} qualities`);
+  const qualities = (probe.qualities || []).map((q) => {
+    return `<button type="button" class="probe-pill" data-set-quality="${esc(String(q.height))}">${esc(q.label || `${q.height}p`)}</button>`;
+  }).join("");
+
+  let playlistPickerHTML = "";
+  if (isPlaylist && probe.entries && probe.entries.length) {
+    const selectedCount = state.selected.size;
+    const totalCount = probe.entries.length;
+    const filter = (state.entryFilter || "").toLowerCase();
+    const visibleEntries = filter
+      ? probe.entries.filter((e) => (e.title || "").toLowerCase().includes(filter) || String(e.index).includes(filter))
+      : probe.entries;
+
+    playlistPickerHTML = `
+      <div class="probe-playlist-picker">
+        <div class="probe-playlist-head">
+          <div class="probe-playlist-title">Playlist Videos (<span id="probe-selected-count">${selectedCount}</span> of ${totalCount} selected)</div>
+          <div class="probe-playlist-actions">
+            <div class="probe-playlist-search">
+              <svg><use href="#i-search"/></svg>
+              <input type="search" id="probe-entry-search" placeholder="Search playlist…" value="${esc(state.entryFilter)}">
+            </div>
+            <button type="button" class="btn tiny ghost" id="probe-select-all">Select All</button>
+            <button type="button" class="btn tiny ghost" id="probe-select-none">Clear</button>
+          </div>
+        </div>
+        <div class="probe-playlist-list" id="probe-playlist-items">
+          ${visibleEntries.map((e) => {
+            const isSel = state.selected.has(e.url);
+            return `
+              <div class="probe-entry-row ${isSel ? "is-selected" : ""}" data-entry-url="${esc(e.url)}">
+                <input type="checkbox" class="probe-entry-checkbox" ${isSel ? "checked" : ""} data-url="${esc(e.url)}">
+                <span class="probe-entry-num">#${e.index}</span>
+                <span class="probe-entry-title" title="${esc(e.title)}">${esc(e.title || "Item #" + e.index)}</span>
+                <span class="probe-entry-duration">${duration(e.duration)}</span>
+              </div>`;
+          }).join("")}
+        </div>
+      </div>`;
   }
 
-  let body = "";
-  if (isPlaylist) {
-    body = `
-      <div class="playlist-toolbar">
-        <input class="grow" id="entryFilter" type="text" placeholder="Filter titles…" value="${esc(state.entryFilter)}" ${probe.entries.length ? "" : "disabled"}>
-        <button type="button" class="toolbar-btn" id="sel-all">All</button>
-        <button type="button" class="toolbar-btn" id="sel-none">None</button>
-        <button type="button" class="toolbar-btn" id="sel-invert">Invert</button>
-        <span class="sel-count" id="sel-count">${state.selected.size} of ${probe.entries.length}</span>
-      </div>
-      <div class="playlist-toolbar">
-        <input id="rangeInput" type="text" placeholder="Parts: 1-5,8,20-25" ${probe.entries.length ? "" : "disabled"}>
-        <button type="button" class="toolbar-btn" id="apply-range">Apply parts</button>
-        <span class="muted">${probe.truncated ? `first ${probe.entries.length} entries shown` : "checkboxes take priority"}</span>
-      </div>
-      <div class="entries" id="entries"></div>`;
-  } else {
-    const qualities = (probe.qualities || []).slice(0, 10).map((quality) => `
-      <button type="button" class="qbadge" data-set-quality="${quality.height}"
-              title="${quality.estimated_bytes ? "≈ " + bytes(quality.estimated_bytes) : "available"}">${esc(quality.label)}</button>`).join("");
-    body = `<div class="media-qualities">${qualities || '<span class="muted">No video formats listed</span>'}</div>`;
-  }
-
+  container.classList.remove("hidden");
   container.innerHTML = `
-    <div class="media">
-      <div class="media-thumb">${thumb}${durationBadge}${live}</div>
-      <div class="media-body">
-        <span class="media-kind ${isPlaylist ? "" : "video"}">${isPlaylist ? "playlist" : "video"}</span>
-        <h3 class="media-title">${esc(probe.title)}</h3>
-        <div class="media-meta">${metaParts.map((part) => `<span>${part}</span>`).join("")}</div>
-        ${isPlaylist ? "" : body}
+    <div class="probe-layout">
+      <div class="probe-thumb-box">
+        ${thumb}
+        ${durationBadge}
+      </div>
+      <div class="probe-details">
+        <h3 class="probe-title">${esc(probe.title || "Untitled Media")}</h3>
+        <p class="probe-uploader">${esc(probe.uploader || "Unknown author")} · ${isPlaylist ? `${probe.entry_count} items` : `${(probe.qualities || []).length} formats found`}</p>
+        <div class="probe-qualities">
+          ${qualities || '<span class="muted">Standard formats available</span>'}
+        </div>
       </div>
     </div>
-    ${isPlaylist ? body : ""}
-    ${probe.truncated ? '<p class="note">The playlist is longer than the server cap — adjust <code>TT_PROBE_MAX_ENTRIES</code> if you need every entry.</p>' : ""}`;
-  container.classList.remove("hidden");
-
-  if (isPlaylist) renderEntries();
-}
-
-function filteredEntries() {
-  const entries = state.probe ? state.probe.entries : [];
-  const needle = state.entryFilter.trim().toLowerCase();
-  return needle ? entries.filter((entry) => entry.title.toLowerCase().includes(needle)) : entries;
-}
-
-function renderEntries() {
-  const container = $("#entries");
-  if (!container || !state.probe) return;
-  const filtered = filteredEntries();
-  const limit = state.showAll ? filtered.length : MAX_ENTRIES;
-  const visible = filtered.slice(0, limit);
-
-  container.innerHTML = visible.map((entry) => `
-    <label class="entry">
-      <input type="checkbox" class="entry-check" data-url="${esc(entry.url)}" ${state.selected.has(entry.url) ? "checked" : ""}>
-      <span class="entry-index">${entry.index}</span>
-      <span class="entry-title" title="${esc(entry.title)}">${esc(entry.title)}</span>
-      <span class="entry-duration">${duration(entry.duration) || "—"}</span>
-    </label>`).join("") || `<div class="entries-more muted">No titles match the filter.</div>`;
-
-  if (filtered.length > visible.length) {
-    container.insertAdjacentHTML("beforeend",
-      `<div class="entries-more"><button type="button" class="toolbar-btn" id="show-all">Show all ${filtered.length}</button></div>`);
-  }
-
-  const count = $("#sel-count");
-  if (count) count.textContent = `${state.selected.size} of ${state.probe.entries.length} selected`;
-}
-
-function parseSpec(text, total) {
-  const value = text.trim();
-  if (!value || value.toLowerCase() === "all" || value === "*") return null;
-  const parts = value.split(/[,\s]+/).filter(Boolean);
-  const output = [];
-  for (const part of parts) {
-    const match = part.match(/^(\d+)(?:-(\d*))?$/);
-    if (!match) throw new Error(`Invalid part "${part}" — use 1-5,8,10-12`);
-    const start = Number(match[1]);
-    const isRange = part.includes("-");
-    const end = isRange ? (match[2] ? Number(match[2]) : total) : start;
-    if (start < 1) throw new Error("Parts start at 1");
-    if (end < start) throw new Error(`Part "${part}" is backwards`);
-    if (end > total) throw new Error(`Part "${part}" exceeds the playlist length (${total})`);
-    for (let index = start; index <= end; index += 1) output.push(index);
-  }
-  return [...new Set(output)];
+    ${playlistPickerHTML}`;
 }
 
 async function analyze() {
   const url = $("#url").value.trim();
   if (!url) {
-    toast("Paste a media URL first", "warn");
+    toast("Please enter a media URL first", "warn");
     $("#url").focus();
     return;
   }
   const button = $("#analyze");
   setLoading(button, true, "Analyzing…");
   renderProbeLoading();
-  const options = collectOptions();
   try {
-    const probe = await api("/api/probe", {
+    const result = await api("/api/probe", {
       method: "POST",
       body: JSON.stringify({
         url,
-        mode: options.mode,
-        cookies_file: options.cookies_file,
-        cookies_from_browser: options.cookies_from_browser,
-        proxy: options.proxy,
+        mode: value("mode") || "auto",
+        cookies_file: value("cookieFile"),
+        cookies_from_browser: value("browserCookies"),
+        proxy: value("proxy"),
       }),
     });
-    state.probe = probe;
+    state.probe = result;
     state.probeUrl = url;
-    state.entryFilter = "";
-    state.showAll = false;
-    state.selected = new Set(probe.kind === "playlist" ? probe.entries.map((entry) => entry.url) : []);
-    renderProbe();
-    if (probe.kind === "playlist" && probe.truncated) {
-      toast(`Playlist truncated to ${probe.entries.length} entries`, "warn");
+    state.selected.clear();
+    for (const entry of result.entries || []) {
+      state.selected.add(entry.url);
     }
+    renderProbe();
+    toast(`Found: ${result.title || "Media stream"}`, "ok");
   } catch (error) {
     state.probe = null;
-    state.probeUrl = "";
     renderProbeError(error.message);
+    toast(error.message, "err");
   } finally {
     setLoading(button, false);
   }
 }
 
-function selectAll(entries) {
-  state.selected = new Set(entries.map((entry) => entry.url));
-  renderEntries();
-}
-
-/* --------------------------------------------------------------- submit */
 async function submitDownload(event) {
-  event.preventDefault();
+  if (event) event.preventDefault();
   const url = $("#url").value.trim();
   if (!url) {
-    toast("Paste a media URL first", "warn");
+    toast("Please paste a media URL to download", "warn");
     $("#url").focus();
     return;
   }
-
   const options = collectOptions();
   let entries = null;
-  if (state.probe && state.probeUrl === url && state.probe.kind === "playlist") {
-    if (!state.selected.size) {
-      toast("Select at least one playlist video", "warn");
+  if (state.probe && state.probe.kind === "playlist" && state.probeUrl === url) {
+    entries = (state.probe.entries || [])
+      .filter((entry) => state.selected.has(entry.url))
+      .map((entry) => ({ url: entry.url, title: entry.title, index: entry.index, duration: entry.duration }));
+    if (!entries.length) {
+      toast("Select at least one video from the playlist", "warn");
       return;
     }
-    entries = state.probe.entries
-      .filter((entry) => state.selected.has(entry.url))
-      .map((entry) => ({
-        url: entry.url,
-        title: entry.title,
-        index: entry.index,
-        duration: entry.duration,
-      }));
   }
 
   const button = $("#submit");
@@ -510,15 +627,15 @@ async function submitDownload(event) {
         title: state.probeUrl === url && state.probe ? state.probe.title : "",
       }),
     });
-    toast(`Queued ${job.total_items} video${job.total_items === 1 ? "" : "s"}`, "ok");
+    toast(`Queued ${job.total_items} item${job.total_items === 1 ? "" : "s"}`, "ok");
     upsertJob(job);
     $("#url").value = "";
     state.probe = null;
     state.probeUrl = "";
     state.selected.clear();
     renderProbe();
-    $("#url").focus();
     savePrefs();
+    updateOverviewWidgets();
   } catch (error) {
     toast(error.message, "err");
   } finally {
@@ -529,299 +646,427 @@ async function submitDownload(event) {
 /* ------------------------------------------------------------------ jobs */
 function statusBadge(status) {
   const label = STATUS_LABELS[status] || status;
-  return `<span class="status st-${esc(status)}">${esc(label)}</span>`;
+  return `<span class="status-badge ${esc(status)}">${esc(label)}</span>`;
 }
 
-function jobClass(job) {
-  if (["running", "queued"].includes(job.status)) return "is-active";
-  if (job.status === "completed") return "is-done";
-  if (["failed", "partial", "interrupted"].includes(job.status)) return "is-failed";
-  return "";
-}
-
-function retryableJob(job) {
-  return (
-    (job.failed_items || 0) > 0 ||
-    (job.cancelled_items || 0) > 0 ||
-    ["failed", "partial", "cancelled", "interrupted"].includes(job.status)
-  );
-}
-
-function jobMeta(job) {
-  const parts = [`${job.completed_items}/${job.total_items} done`];
-  if (job.failed_items) parts.push(`<span class="bad">${job.failed_items} failed</span>`);
-  if (job.active_items) parts.push(`${job.active_items} active`);
-  if (job.speed > 0) parts.push(`<span class="hot">${bytes(job.speed)}/s</span>`);
+function jobMetaText(job) {
+  const parts = [`${job.completed_items || 0}/${job.total_items || 1} completed`];
+  if (job.failed_items) parts.push(`${job.failed_items} failed`);
+  if (job.speed > 0) parts.push(`${bytes(job.speed)}/s`);
   if (job.eta) parts.push(`ETA ${duration(job.eta)}`);
-  if (job.total_bytes) parts.push(bytes(job.total_bytes));
-  return parts.join('<span class="dotsep">·</span>');
-}
-
-function jobStats(job) {
-  const percent = Math.max(0, Math.min(100, job.percent || 0));
-  const size = job.total_bytes
-    ? `${bytes(job.downloaded)} / ${bytes(job.total_bytes)}`
-    : bytes(job.downloaded);
-  return `<span class="pct">${percent.toFixed(percent < 10 ? 1 : 0)}%</span><span>${size}</span>`;
-}
-
-function jobBarClass(job) {
-  if (job.status === "completed") return "done";
-  if (["failed", "partial", "interrupted"].includes(job.status)) return "fail";
-  return "";
-}
-
-function jobActions(job) {
-  const canCancel = ["queued", "running"].includes(job.status);
-  const canRetry = retryableJob(job);
-  return `
-    <button type="button" class="icon-btn cancel-btn" data-action="cancel" data-job="${job.id}" title="Cancel job" ${canCancel ? "" : "disabled"}>${icon("x")}</button>
-    <button type="button" class="icon-btn" data-action="retry" data-job="${job.id}" title="Retry failed parts" ${canRetry ? "" : "disabled"}>${icon("retry")}</button>
-    <button type="button" class="icon-btn always" data-action="open" data-job="${job.id}" title="Open download folder">${icon("folder")}</button>
-    <button type="button" class="icon-btn danger always" data-action="delete" data-job="${job.id}" title="Remove from list (Shift+click also deletes files)">${icon("trash")}</button>`;
+  return parts.join(" · ");
 }
 
 function jobCardHTML(job) {
-  const items = (job.items || []).map(itemRowHTML).join("");
-  const kindIcon = job.kind === "playlist" ? "list" : "film";
   const percent = Math.max(0, Math.min(100, job.percent || 0));
-  return `
-    <article class="job ${jobClass(job)}" data-job="${job.id}">
-      <div class="job-head">
-        <div class="job-top">
-          <span class="job-kind">${icon(kindIcon)}</span>
-          <div class="job-titles">
-            <h3 class="job-title" title="${esc(job.title)}">${esc(job.title)}</h3>
-            <div class="job-meta">
-              <span data-role="status">${statusBadge(job.status)}</span>
-              <span data-role="meta">${jobMeta(job)}</span>
-            </div>
-          </div>
-          <div class="job-actions" data-role="actions">${jobActions(job)}</div>
-        </div>
-        <div class="job-progress">
-          <div class="bar ${jobBarClass(job)}" data-role="bar"><span style="width:${percent}%"></span></div>
-          <div class="job-stats" data-role="stats">${jobStats(job)}</div>
-        </div>
-      </div>
-      <div class="items" data-role="items">${items}</div>
-    </article>`;
-}
+  const canCancel = ["queued", "running", "downloading", "processing"].includes(job.status);
+  const canRetry = (job.failed_items || 0) > 0 || ["failed", "partial", "cancelled", "interrupted"].includes(job.status);
+  const isRunning = ["running", "downloading", "processing"].includes(job.status);
 
-function itemStatusClass(status) {
-  if (status === "completed") return "is-done";
-  if (["failed", "cancelled", "interrupted"].includes(status)) return "is-fail";
-  if (["running", "downloading"].includes(status)) return "is-run";
-  if (status === "processing") return "is-proc";
-  return "";
-}
-
-function itemActions(item) {
-  const active = ["queued", "running", "downloading", "processing"].includes(item.status);
-  const retryable = ["failed", "cancelled", "interrupted"].includes(item.status);
-  const hasFile = Boolean(item.filepath);
-  return `
-    ${retryable ? `<button type="button" class="icon-btn" data-action="retry-item" data-job="${item.job_id}" data-item="${item.id}" title="Retry this video">${icon("retry")}</button>` : ""}
-    ${active ? `<button type="button" class="icon-btn danger" data-action="cancel-item" data-job="${item.job_id}" data-item="${item.id}" title="Cancel this video">${icon("x")}</button>` : ""}
-    ${hasFile ? `<button type="button" class="icon-btn" data-action="open-item" data-job="${item.job_id}" data-item="${item.id}" title="Show in folder">${icon("folder")}</button>` : ""}
-    ${hasFile ? `<button type="button" class="icon-btn" data-action="copy" data-job="${item.job_id}" data-item="${item.id}" title="Copy file path">${icon("copy")}</button>` : ""}`;
-}
-
-function itemStats(item) {
-  const percent = item.status === "completed" ? 100 : Math.max(0, Math.min(100, item.percent || 0));
-  if (item.status === "completed") {
-    return `<span class="pct">100%</span><span>${bytes(item.total)}</span>`;
-  }
-  if (item.status === "failed") return `<span class="bad">download failed</span>`;
-  if (item.status === "cancelled") return `<span>cancelled</span>`;
-  if (item.status === "interrupted") return `<span>interrupted by restart</span>`;
-  if (item.status === "queued") return `<span>waiting for a worker</span>`;
-  if (item.status === "processing") return `<span class="pct">${percent.toFixed(0)}%</span><span>merging / post-processing…</span>`;
-
-  const parts = [`<span class="pct">${percent.toFixed(percent < 10 ? 1 : 0)}%</span>`];
-  if (item.speed > 0) parts.push(`<span>${bytes(item.speed)}/s</span>`);
-  if (item.total) parts.push(`<span>${bytes(item.downloaded)} / ${bytes(item.total)}</span>`);
-  else if (item.downloaded) parts.push(`<span>${bytes(item.downloaded)}</span>`);
-  if (item.eta) parts.push(`<span>ETA ${duration(item.eta)}</span>`);
-  return parts.join("");
-}
-
-function itemRowHTML(item) {
-  const percent = item.status === "completed" ? 100 : Math.max(0, Math.min(100, item.percent || 0));
-  const error = ["failed", "cancelled", "interrupted"].includes(item.status) ? item.error : "";
-  return `
-    <div class="item ${item.status}" data-item="${item.id}" data-state="${item.status}">
-      <div class="item-top">
-        <span class="item-index">${String(item.index || 0).padStart(2, "0")}</span>
-        <span class="item-title" title="${esc(item.title)}">${esc(item.title)}</span>
-        <span class="item-status ${itemStatusClass(item.status)}">${esc(STATUS_LABELS[item.status] || item.status)}</span>
-        <div class="item-actions">${itemActions(item)}</div>
-      </div>
-      <div class="item-bar">
-        <div class="bar ${item.status === "completed" ? "done" : item.status === "failed" ? "fail" : ""}">
-          <span style="width:${percent}%"></span>
-        </div>
-      </div>
-      <div class="item-stats">${itemStats(item)}</div>
-      <div class="item-error" title="${esc(error)}">${esc(error)}</div>
+  const thumbUrl = getThumbnail(job);
+  const thumbHTML = `
+    <div class="job-thumb-wrap">
+      ${thumbUrl ? `<img class="job-thumb" src="${esc(thumbUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
+      <svg><use href="#i-${job.options?.audio_only ? "music" : "film"}"/></svg>
     </div>`;
+
+  const formatBadge = `
+    <span class="job-format-badge">
+      ${job.options?.audio_only ? `Audio · ${(job.options?.audio_format || "mp3").toUpperCase()}` : `${job.options?.quality || "best"} · ${(job.options?.container || "mp4").toUpperCase()}`}
+    </span>`;
+
+  const hasError = ["failed", "partial", "interrupted"].includes(job.status) && (job.error || (job.failed_items && job.failed_items > 0));
+  const errorText = job.error || (job.failed_items ? `${job.failed_items} item(s) failed during download. Click Retry to retry.` : "Download failed. Check URL or network access.");
+  const errorHTML = hasError ? `
+    <div class="job-error-banner">
+      ${icon("alert")}
+      <span>${esc(errorText)}</span>
+    </div>` : "";
+
+  let itemsAccordionHTML = "";
+  if (job.items && job.items.length > 1) {
+    itemsAccordionHTML = `
+      <details class="job-items-accordion">
+        <summary class="job-items-summary">
+          <span>${job.completed_items || 0} of ${job.total_items} items detailed</span>
+          <svg class="chev"><use href="#i-chevron"/></svg>
+        </summary>
+        <div class="job-items-list">
+          ${job.items.map((item) => `
+            <div class="job-item-row">
+              <span class="job-item-title" title="${esc(item.title)}">#${item.index} ${esc(item.title || "Item")}</span>
+              <div class="job-item-meta">
+                ${item.status === "completed" ? `<span style="color:var(--green); font-weight:700;">${icon("check")} Done</span>` :
+                  item.status === "failed" ? `<span style="color:var(--red); font-weight:700;" title="${esc(item.error)}">${icon("alert")} Failed</span>` :
+                  item.status === "downloading" ? `<span style="color:var(--accent-text); font-weight:700;">${item.percent.toFixed(0)}%</span>` :
+                  `<span class="muted">${esc(item.status)}</span>`}
+                ${item.filepath ? `<span class="muted">(${esc(baseName(item.filepath))})</span>` : ""}
+              </div>
+            </div>`).join("")}
+        </div>
+      </details>`;
+  }
+
+  return `
+    <article class="job-card" data-job="${job.id}">
+      <div class="job-head">
+        <div class="job-title-row">
+          ${thumbHTML}
+          <div style="min-width:0;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+              ${statusBadge(job.status)}
+              ${formatBadge}
+            </div>
+            <h3 class="job-title" title="${esc(job.title)}">${esc(job.title || "Media Download")}</h3>
+          </div>
+        </div>
+        <div class="job-actions">
+          ${canRetry ? `<button type="button" class="btn tiny secondary" data-action="retry" data-job="${job.id}">${icon("retry")}<span>Retry</span></button>` : ""}
+          ${canCancel ? `<button type="button" class="btn tiny danger" data-action="cancel" data-job="${job.id}">${icon("x")}<span>Cancel</span></button>` : ""}
+          <button type="button" class="icon-btn" data-action="open" data-job="${job.id}" title="Open Folder">${icon("folder")}</button>
+          <button type="button" class="icon-btn danger" data-action="delete" data-job="${job.id}" title="Delete Record">${icon("trash")}</button>
+        </div>
+      </div>
+      <div class="job-progress-wrapper">
+        <div class="job-progress-bar">
+          <div class="job-progress-fill ${isRunning && percent === 0 ? "indeterminate" : ""}" style="width: ${percent}%;"></div>
+        </div>
+      </div>
+      <div class="job-meta-row">
+        <span>${job.status === "processing" ? "Processing streams (FFmpeg muxing/embedding)…" : jobMetaText(job)}</span>
+        <span>${percent.toFixed(percent < 10 ? 1 : 0)}% (${bytes(job.downloaded)} / ${bytes(job.total_bytes)})</span>
+      </div>
+      ${errorHTML}
+      ${itemsAccordionHTML}
+    </article>`;
 }
 
 function renderJobs() {
   const container = $("#jobs");
-  const jobs = Array.from(state.jobs.values()).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+  if (!container) return;
+
+  let jobs = Array.from(state.jobs.values()).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+
+  // Filter tab filter
+  if (state.queueFilter !== "all") {
+    if (state.queueFilter === "running") {
+      jobs = jobs.filter((j) => ["running", "downloading", "processing"].includes(j.status));
+    } else {
+      jobs = jobs.filter((j) => j.status === state.queueFilter);
+    }
+  }
+
+  // Search filter
+  if (state.queueSearch) {
+    const q = state.queueSearch.toLowerCase();
+    jobs = jobs.filter((j) => (j.title || "").toLowerCase().includes(q) || j.id.includes(q));
+  }
+
   container.innerHTML = jobs.map(jobCardHTML).join("");
-  $("#empty").classList.toggle("hidden", jobs.length > 0);
+  $("#empty")?.classList.toggle("hidden", jobs.length > 0);
   updateQueueMeta();
 }
 
 function updateQueueMeta() {
+  const allJobs = Array.from(state.jobs.values());
+  const active = allJobs.filter((j) => ["queued", "running", "downloading", "processing"].includes(j.status)).length;
+
+  const countBadge = $("#queue-count");
+  if (countBadge) countBadge.textContent = String(allJobs.length);
+
+  const navBadge = $("#nav-queue-count");
+  if (navBadge) navBadge.textContent = String(active);
+
+  const clearBtn = $("#clear-finished");
+  if (clearBtn) {
+    clearBtn.disabled = !allJobs.some((j) => ["completed", "failed", "cancelled"].includes(j.status));
+  }
+}
+
+/* ----------------------------------------------------- overview widgets */
+function updateOverviewWidgets() {
   const jobs = Array.from(state.jobs.values());
-  const active = jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
-  $("#queue-count").textContent = String(jobs.length);
-  $("#queue-sub").textContent = jobs.length
-    ? `${active} active · ${jobs.length} job${jobs.length === 1 ? "" : "s"} in this session`
-    : "Live progress streamed from the download workers.";
-  const clear = $("#clear-finished");
-  clear.disabled = !jobs.some((job) => ["completed", "failed", "cancelled", "partial", "interrupted"].includes(job.status));
+  const active = jobs.filter((j) => ["queued", "running", "downloading", "processing"].includes(j.status)).length;
+  const completed = jobs.filter((j) => j.status === "completed").length;
+  const failed = jobs.filter((j) => ["failed", "partial"].includes(j.status)).length;
+  const total = jobs.length;
+
+  if ($("#stat-active")) $("#stat-active").textContent = String(active);
+  if ($("#stat-completed")) $("#stat-completed").textContent = String(completed);
+  if ($("#stat-failed")) $("#stat-failed").textContent = String(failed);
+  if ($("#stat-total")) $("#stat-total").textContent = String(total);
+
+  // Active Spotlight
+  const activeJob = jobs.find((j) => ["running", "downloading", "processing"].includes(j.status));
+  const spotlightSection = $("#overview-spotlight");
+  const spotlightBody = $("#spotlight-content");
+
+  if (activeJob && spotlightSection && spotlightBody) {
+    spotlightSection.classList.remove("hidden");
+    const percent = Math.max(0, Math.min(100, activeJob.percent || 0));
+    spotlightBody.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h4 style="font-family:var(--font-heading); font-size:16px; font-weight:800;">${esc(activeJob.title || "Active Download")}</h4>
+        <span style="font-family:var(--font-mono); font-size:13px; font-weight:700;">${percent.toFixed(0)}%</span>
+      </div>
+      <div class="job-progress-bar" style="margin-bottom:10px;">
+        <div class="job-progress-fill" style="width:${percent}%;"></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; color:var(--text-secondary); font-family:var(--font-mono);">
+        <span>${bytes(activeJob.speed)}/s · ETA ${duration(activeJob.eta)}</span>
+        <span>${bytes(activeJob.downloaded)} of ${bytes(activeJob.total_bytes)}</span>
+      </div>`;
+  } else if (spotlightSection) {
+    spotlightSection.classList.add("hidden");
+  }
+
+  // Recent downloads list
+  const recentContainer = $("#overview-recent-list");
+  if (recentContainer) {
+    const recentJobs = jobs.slice(0, 5);
+    if (!recentJobs.length) {
+      recentContainer.innerHTML = `<div class="empty-state" style="padding:28px;"><p class="muted">No recent downloads yet.</p></div>`;
+    } else {
+      recentContainer.innerHTML = recentJobs.map((job) => `
+        <div class="recent-row">
+          <div class="recent-left">
+            ${statusBadge(job.status)}
+            <div>
+              <div class="recent-title">${esc(job.title || "Media Download")}</div>
+              <div class="recent-meta">${formatDate(job.created_at)} · ${job.total_items} items</div>
+            </div>
+          </div>
+          <button type="button" class="btn tiny secondary" data-action="open" data-job="${job.id}">${icon("folder")}<span>Folder</span></button>
+        </div>`).join("");
+    }
+  }
 }
 
-function updateJobCard(job) {
-  const card = document.querySelector(`.job[data-job="${job.id}"]`);
-  if (!card) {
-    renderJobs();
+/* ------------------------------------------------------------- history */
+function renderHistory() {
+  const tbody = $("#history-tbody");
+  const empty = $("#history-empty");
+  const table = $("#history-table");
+  if (!tbody) return;
+
+  let jobs = Array.from(state.jobs.values()).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+
+  if (state.historyFilter === "completed") {
+    jobs = jobs.filter((j) => j.status === "completed");
+  } else if (state.historyFilter === "failed") {
+    jobs = jobs.filter((j) => ["failed", "partial", "cancelled"].includes(j.status));
+  }
+
+  if (state.historyFormat === "video") {
+    jobs = jobs.filter((j) => !j.options?.audio_only);
+  } else if (state.historyFormat === "audio") {
+    jobs = jobs.filter((j) => j.options?.audio_only);
+  }
+
+  if (state.historySearch) {
+    const q = state.historySearch.toLowerCase();
+    jobs = jobs.filter((j) => (j.title || "").toLowerCase().includes(q));
+  }
+
+  if (!jobs.length) {
+    tbody.innerHTML = "";
+    table?.classList.add("hidden");
+    empty?.classList.remove("hidden");
     return;
   }
-  card.className = `job ${jobClass(job)}`;
-  const status = card.querySelector('[data-role="status"]');
-  if (status) status.innerHTML = statusBadge(job.status);
-  const meta = card.querySelector('[data-role="meta"]');
-  if (meta) meta.innerHTML = jobMeta(job);
-  const actions = card.querySelector('[data-role="actions"]');
-  if (actions) actions.innerHTML = jobActions(job);
-  const bar = card.querySelector('[data-role="bar"]');
-  if (bar) {
-    bar.className = `bar ${jobBarClass(job)}`;
-    bar.firstElementChild.style.width = `${Math.max(0, Math.min(100, job.percent || 0))}%`;
-  }
-  const stats = card.querySelector('[data-role="stats"]');
-  if (stats) stats.innerHTML = jobStats(job);
-  updateQueueMeta();
+
+  table?.classList.remove("hidden");
+  empty?.classList.add("hidden");
+
+  tbody.innerHTML = jobs.map((job) => {
+    const thumbUrl = getThumbnail(job);
+    const thumbHTML = `
+      <div class="job-thumb-wrap" style="width:46px; height:32px;">
+        ${thumbUrl ? `<img class="job-thumb" src="${esc(thumbUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
+        <svg style="width:14px; height:14px;"><use href="#i-${job.options?.audio_only ? "music" : "film"}"/></svg>
+      </div>`;
+    const formatLabel = job.options?.audio_only
+      ? `Audio · ${(job.options?.audio_format || "mp3").toUpperCase()}`
+      : `${job.options?.quality || "best"} · ${(job.options?.container || "mp4").toUpperCase()}`;
+
+    return `
+      <tr>
+        <td data-label="Video">
+          <div class="history-video-cell">
+            ${thumbHTML}
+            <div class="history-video-title" title="${esc(job.title)}">${esc(job.title || "Media Download")}</div>
+          </div>
+        </td>
+        <td data-label="Format"><span class="probe-pill">${esc(formatLabel)}</span></td>
+        <td data-label="Size">${bytes(job.total_bytes || job.downloaded)}</td>
+        <td data-label="Date">${formatDate(job.created_at)}</td>
+        <td data-label="Status">${statusBadge(job.status)}</td>
+        <td data-label="Actions">
+          <div class="history-actions-cell">
+            <button type="button" class="icon-btn" data-action="open" data-job="${job.id}" title="Open Folder">${icon("folder")}</button>
+            <button type="button" class="icon-btn danger" data-action="delete" data-job="${job.id}" title="Remove Record">${icon("trash")}</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join("");
 }
 
+/* --------------------------------------------------------------- files */
+async function loadFiles() {
+  const grid = $("#files-grid");
+  const empty = $("#files-empty");
+  const countBadge = $("#files-count-badge");
+  if (!grid) return;
+
+  try {
+    const query = state.filesSearch ? `?search=${encodeURIComponent(state.filesSearch)}` : "";
+    const files = await api(`/api/files${query}`);
+    state.files = files || [];
+
+    const totalBytes = state.files.reduce((acc, f) => acc + (f.size || 0), 0);
+    if (countBadge) {
+      countBadge.textContent = `${state.files.length} file${state.files.length === 1 ? "" : "s"} · ${bytes(totalBytes)} total`;
+    }
+
+    if (!state.files.length) {
+      grid.innerHTML = "";
+      empty?.classList.remove("hidden");
+      return;
+    }
+
+    empty?.classList.add("hidden");
+    grid.innerHTML = state.files.map((file) => `
+      <div class="file-card">
+        <div class="file-top">
+          <span class="file-ext-badge">${esc(file.extension || "bin")}</span>
+          <div class="file-name" title="${esc(file.name)}">${esc(file.name)}</div>
+        </div>
+        <div class="file-details">
+          <span>${bytes(file.size)}</span>
+          <span>${formatDate(file.modified)}</span>
+        </div>
+        <div class="file-card-actions">
+          <button type="button" class="btn tiny secondary" data-file-action="open" data-name="${esc(file.name)}" title="Open file">${icon("film")}<span>Open</span></button>
+          <button type="button" class="btn tiny secondary" data-file-action="copy" data-path="${esc(file.path)}">${icon("copy")}<span>Copy Path</span></button>
+          <button type="button" class="btn tiny danger" data-file-action="delete" data-name="${esc(file.name)}" title="Delete file from disk">${icon("trash")}</button>
+        </div>
+      </div>`).join("");
+  } catch (error) {
+    toast(`Could not load files: ${error.message}`, "err");
+  }
+}
+
+async function cleanTempFiles() {
+  const confirmed = await confirmModal(
+    "Clean Incomplete Files",
+    "Delete leftover .part and .ytdl download fragments from disk? This frees space from interrupted jobs.",
+    "Clean Files",
+    false
+  );
+  if (!confirmed) return;
+  try {
+    const result = await api("/api/files/clean-temp", { method: "POST" });
+    toast(`Cleaned ${result.cleaned} temp file(s), freed ${bytes(result.bytes_freed)}`, "ok");
+    loadFiles();
+  } catch (error) {
+    toast(`Could not clean temp files: ${error.message}`, "err");
+  }
+}
+
+/* ------------------------------------------------------------------ sync */
 function upsertJob(job) {
-  if (!job || !job.id) return;
-  const previous = state.jobs.get(job.id) || {};
-  const merged = { ...previous, ...job };
-  if (!job.items && previous.items) merged.items = previous.items;
-  state.jobs.set(job.id, merged);
-  if (!job.items && !previous.id) {
-    syncJobs();
-    return;
-  }
-  if (document.querySelector(`.job[data-job="${job.id}"]`)) updateJobCard(merged);
-  else renderJobs();
-}
-
-function updateItemRow(item) {
-  const job = state.jobs.get(item.job_id);
-  if (!job) {
-    syncJobs();
-    return;
-  }
-  if (!job.items) job.items = [];
-  const index = job.items.findIndex((candidate) => candidate.id === item.id);
-  if (index === -1) {
-    job.items.push(item);
-    renderJobs();
-    return;
-  }
-  job.items[index] = item;
-
-  const row = document.querySelector(`.item[data-item="${item.id}"]`);
-  if (!row) return;
-
-  const statusCell = row.querySelector(".item-status");
-  statusCell.className = `item-status ${itemStatusClass(item.status)}`;
-  statusCell.textContent = STATUS_LABELS[item.status] || item.status;
-
-  const bar = row.querySelector(".item-bar .bar");
-  bar.className = `bar ${item.status === "completed" ? "done" : item.status === "failed" ? "fail" : ""}`;
-  bar.firstElementChild.style.width = `${item.status === "completed" ? 100 : Math.max(0, Math.min(100, item.percent || 0))}%`;
-  row.querySelector(".item-stats").innerHTML = itemStats(item);
-
-  const error = ["failed", "cancelled", "interrupted"].includes(item.status) ? item.error : "";
-  const errorCell = row.querySelector(".item-error");
-  errorCell.textContent = error || "";
-  errorCell.title = error || "";
-
-  if (row.dataset.state !== item.status) {
-    row.dataset.state = item.status;
-    row.className = `item ${item.status}`;
-    row.querySelector(".item-actions").innerHTML = itemActions(item);
-  }
+  state.jobs.set(job.id, job);
+  renderJobs();
+  if (state.currentPage === "overview") updateOverviewWidgets();
+  if (state.currentPage === "history") renderHistory();
 }
 
 async function syncJobs() {
   if (state.syncPromise) return state.syncPromise;
-  state.syncPromise = (async () => {
-    try {
-      const data = await api("/api/jobs?limit=100");
-      state.jobs = new Map((data.jobs || []).map((job) => [job.id, job]));
+  state.syncPromise = api("/api/jobs")
+    .then((payload) => {
+      state.jobs = new Map((payload.jobs || []).map((j) => [j.id, j]));
       renderJobs();
-    } catch (error) {
-      /* transient network errors are handled by the SSE reconnect */
-    } finally {
-      state.syncPromise = null;
-    }
-  })();
+      if (state.currentPage === "overview") updateOverviewWidgets();
+      if (state.currentPage === "history") renderHistory();
+    })
+    .catch(() => null)
+    .finally(() => { state.syncPromise = null; });
   return state.syncPromise;
 }
 
-/* --------------------------------------------------------------- actions */
+/* ----------------------------------------------------------- job actions */
 async function handleJobAction(event) {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
-  const { action, job: jobId, item: itemId } = button.dataset;
-  if (!action || !jobId) return;
+  const target = event.target.closest("[data-action]");
+  if (!target) return;
+  const action = target.dataset.action;
+  const jobId = target.dataset.job;
 
   try {
     if (action === "cancel") {
-      button.disabled = true;
+      const confirmed = await confirmModal("Cancel Download", "Stop this active download job?", "Cancel Job", true);
+      if (!confirmed) return;
       await api(`/api/jobs/${jobId}/cancel`, { method: "POST" });
-      toast("Cancelling job…", "warn");
+      toast("Cancellation requested", "warn");
     } else if (action === "retry") {
-      const result = await api(`/api/jobs/${jobId}/retry`, { method: "POST" });
-      toast(`Retrying ${result.retried} video${result.retried === 1 ? "" : "s"}…`, "ok");
-    } else if (action === "cancel-item") {
-      button.disabled = true;
-      await api(`/api/jobs/${jobId}/items/${itemId}/cancel`, { method: "POST" });
-    } else if (action === "retry-item") {
-      await api(`/api/jobs/${jobId}/items/${itemId}/retry`, { method: "POST" });
-      toast("Retrying video…", "ok");
+      await api(`/api/jobs/${jobId}/retry`, { method: "POST" });
+      toast("Retrying download…", "ok");
     } else if (action === "open") {
       await api(`/api/jobs/${jobId}/open`, { method: "POST" });
-    } else if (action === "open-item") {
-      await api(`/api/jobs/${jobId}/open?item_id=${encodeURIComponent(itemId)}`, { method: "POST" });
-    } else if (action === "copy") {
-      const job = state.jobs.get(jobId);
-      const item = job && job.items ? job.items.find((candidate) => candidate.id === itemId) : null;
-      if (item && item.filepath) await copyText(item.filepath);
     } else if (action === "delete") {
-      const deleteFiles = event.shiftKey;
-      const message = deleteFiles
-        ? "Delete this job AND its downloaded files? This cannot be undone."
-        : "Remove this job from the list? Downloaded files stay on disk.";
-      if (!window.confirm(message)) return;
-      await api(`/api/jobs/${jobId}?delete_files=${deleteFiles}`, { method: "DELETE" });
+      const confirmed = await confirmModal(
+        "Remove Record",
+        "Remove this download record from ClipFlow history? The downloaded file on disk will NOT be deleted.",
+        "Remove",
+        true
+      );
+      if (!confirmed) return;
+      await api(`/api/jobs/${jobId}?delete_files=false`, { method: "DELETE" });
       state.jobs.delete(jobId);
       renderJobs();
-      toast(deleteFiles ? "Job and files deleted" : "Job removed from list", "ok");
+      if (state.currentPage === "overview") updateOverviewWidgets();
+      if (state.currentPage === "history") renderHistory();
+      toast("Record removed", "ok");
       return;
     }
     setTimeout(syncJobs, 250);
   } catch (error) {
     toast(error.message, "err");
+  }
+}
+
+async function handleFileAction(event) {
+  const target = event.target.closest("[data-file-action]");
+  if (!target) return;
+  const action = target.dataset.fileAction;
+
+  if (action === "open") {
+    const fileName = target.dataset.name;
+    try {
+      await api(`/api/files/${encodeURIComponent(fileName)}/open`, { method: "POST" });
+      toast(`Opened ${fileName}`, "ok");
+    } catch (error) {
+      toast(`Could not open file: ${error.message}`, "err");
+    }
+  } else if (action === "copy") {
+    const path = target.dataset.path;
+    await copyText(path);
+  } else if (action === "delete") {
+    const fileName = target.dataset.name;
+    const confirmed = await confirmModal(
+      "Delete File",
+      `Are you sure you want to permanently delete "${fileName}" from disk?`,
+      "Delete Permanently",
+      true
+    );
+    if (!confirmed) return;
+    try {
+      await api(`/api/files/${encodeURIComponent(fileName)}`, { method: "DELETE" });
+      toast(`Deleted ${fileName}`, "ok");
+      loadFiles();
+    } catch (error) {
+      toast(`Could not delete file: ${error.message}`, "err");
+    }
   }
 }
 
@@ -838,14 +1083,22 @@ async function copyText(text) {
     document.execCommand("copy");
     area.remove();
   }
-  toast("File path copied", "ok");
+  toast("File path copied to clipboard", "ok");
 }
 
 async function clearFinished() {
   const finished = Array.from(state.jobs.values()).filter((job) =>
     ["completed", "failed", "cancelled", "partial", "interrupted"].includes(job.status));
   if (!finished.length) return;
-  if (!window.confirm(`Remove ${finished.length} finished job${finished.length === 1 ? "" : "s"} from the list? Files stay on disk.`)) return;
+
+  const confirmed = await confirmModal(
+    "Clear Finished",
+    `Remove ${finished.length} finished download records? Output files on disk remain safe.`,
+    "Clear",
+    false
+  );
+  if (!confirmed) return;
+
   const button = $("#clear-finished");
   setLoading(button, true, "Clearing…");
   try {
@@ -903,38 +1156,33 @@ function connectEvents() {
 
   source.onmessage = (event) => {
     try {
-      handleEvent(JSON.parse(event.data));
+      const data = JSON.parse(event.data);
+      if (data.type === "snapshot") {
+        state.jobs = new Map((data.jobs || []).map((j) => [j.id, j]));
+        renderJobs();
+        if (state.currentPage === "overview") updateOverviewWidgets();
+        if (state.currentPage === "history") renderHistory();
+      } else if (data.type === "job") {
+        upsertJob(data.job);
+      }
     } catch {
       /* ignore malformed frame */
     }
   };
 }
 
-function handleEvent(event) {
-  if (event.type === "snapshot") {
-    state.jobs = new Map((event.jobs || []).map((job) => [job.id, job]));
-    renderJobs();
-    return;
-  }
-  if (event.type === "job") {
-    upsertJob(event.job);
-    return;
-  }
-  if (event.type === "item") {
-    updateItemRow(event.item);
-  }
-}
-
 function setConnection(online) {
   const node = $("#conn");
-  node.classList.toggle("on", online);
-  node.classList.toggle("off", !online);
-  node.title = online ? "Live progress connected" : "Reconnecting to live progress…";
+  if (node) {
+    node.classList.toggle("on", online);
+    node.classList.toggle("off", !online);
+    node.title = online ? "Live progress connected" : "Reconnecting to live progress…";
+  }
 }
 
 function startPolling() {
   if (state.pollTimer) return;
-  state.pollTimer = setInterval(syncJobs, 12000);
+  state.pollTimer = setInterval(syncJobs, 10000);
 }
 
 function stopPolling() {
@@ -946,52 +1194,197 @@ function stopPolling() {
 
 /* ------------------------------------------------------------------ init */
 function bindEvents() {
-  $("#form").addEventListener("submit", submitDownload);
-  $("#analyze").addEventListener("click", analyze);
+  // Navigation tabs
+  $$(".sidebar-nav .nav-item").forEach((btn) => {
+    btn.addEventListener("click", () => switchPage(btn.dataset.page));
+  });
 
-  $("#url").addEventListener("input", () => {
-    const current = $("#url").value.trim();
+  // Mobile nav toggle
+  $("#mobile-nav-toggle")?.addEventListener("click", () => {
+    $("#sidebar")?.classList.toggle("is-open");
+  });
+
+  // Theme switchers
+  $("#theme-toggle")?.addEventListener("click", toggleTheme);
+  $$(".theme-choice").forEach((choice) => {
+    choice.addEventListener("click", () => applyTheme(choice.dataset.setTheme));
+  });
+
+  // Quick Action Buttons & Overview Quick Links
+  $("#quick-new-btn")?.addEventListener("click", () => {
+    switchPage("overview");
+    $("#url")?.focus();
+  });
+  $("#spotlight-view-queue")?.addEventListener("click", () => switchPage("downloads"));
+  $("#recent-view-all")?.addEventListener("click", () => switchPage("downloads"));
+  $("#empty-new-btn")?.addEventListener("click", () => {
+    switchPage("overview");
+    $("#url")?.focus();
+  });
+
+  // Overview Quick Navigation Cards (Spec Section 4.1)
+  $("#quick-to-downloads")?.addEventListener("click", () => switchPage("downloads"));
+  $("#quick-to-history")?.addEventListener("click", () => switchPage("history"));
+  $("#quick-to-files")?.addEventListener("click", () => switchPage("files"));
+
+  // Topbar open directory
+  $("#pill-dir")?.addEventListener("click", async () => {
+    try {
+      await api("/api/folder/open", { method: "POST" });
+    } catch (e) {
+      toast("Could not open folder: " + e.message, "err");
+    }
+  });
+
+  // Files page actions
+  $("#btn-open-dir")?.addEventListener("click", async () => {
+    try {
+      await api("/api/folder/open", { method: "POST" });
+    } catch (e) {
+      toast("Could not open folder: " + e.message, "err");
+    }
+  });
+  $("#btn-refresh-files")?.addEventListener("click", loadFiles);
+  $("#btn-clean-temp-files")?.addEventListener("click", cleanTempFiles);
+  $("#settings-btn-clean-temp")?.addEventListener("click", cleanTempFiles);
+  $("#files-search")?.addEventListener("input", (e) => {
+    state.filesSearch = e.target.value.trim();
+    loadFiles();
+  });
+  $("#files-grid")?.addEventListener("click", handleFileAction);
+
+  // Settings page folder button
+  $("#settings-btn-open-folder")?.addEventListener("click", async () => {
+    try {
+      await api("/api/folder/open", { method: "POST" });
+    } catch (e) {
+      toast("Could not open folder: " + e.message, "err");
+    }
+  });
+
+  // Settings API key & data clear
+  $("#btn-save-api-key")?.addEventListener("click", () => {
+    const key = $("#settings-api-key").value.trim();
+    state.apiKey = key;
+    localStorage.setItem(KEY_STORE, key);
+    toast("API key saved", "ok");
+    connectEvents();
+  });
+
+  $("#btn-clear-local-data")?.addEventListener("click", async () => {
+    const confirmed = await confirmModal("Clear Local Cache", "Reset local preferences and stored API key?", "Clear Cache", true);
+    if (!confirmed) return;
+    localStorage.removeItem(PREFS_STORE);
+    localStorage.removeItem(KEY_STORE);
+    state.apiKey = "";
+    toast("Local cache cleared", "ok");
+  });
+
+  // Queue Filters
+  $$("#queue-filters .filter-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      $$("#queue-filters .filter-tab").forEach((t) => t.classList.remove("is-active"));
+      tab.classList.add("is-active");
+      state.queueFilter = tab.dataset.filter;
+      renderJobs();
+    });
+  });
+
+  $("#queue-search")?.addEventListener("input", (e) => {
+    state.queueSearch = e.target.value.trim();
+    renderJobs();
+  });
+
+  // History Filters
+  $$("#history-filters .filter-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      $$("#history-filters .filter-tab").forEach((t) => t.classList.remove("is-active"));
+      tab.classList.add("is-active");
+      state.historyFilter = tab.dataset.historyFilter;
+      renderHistory();
+    });
+  });
+
+  $$("#history-format-filters .filter-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      $$("#history-format-filters .filter-tab").forEach((t) => t.classList.remove("is-active"));
+      tab.classList.add("is-active");
+      state.historyFormat = tab.dataset.historyFormat;
+      renderHistory();
+    });
+  });
+
+  $("#history-search")?.addEventListener("input", (e) => {
+    state.historySearch = e.target.value.trim();
+    renderHistory();
+  });
+
+  // Overview / Composer Form
+  $("#form")?.addEventListener("submit", submitDownload);
+  $("#analyze")?.addEventListener("click", analyze);
+
+  const urlInput = $("#url");
+  const clearBtn = $("#clear-url");
+
+  urlInput?.addEventListener("input", () => {
+    const current = urlInput.value.trim();
+    clearBtn?.classList.toggle("hidden", !current);
     if (state.probe && current !== state.probeUrl) {
       state.probe = null;
       state.probeUrl = "";
       state.selected.clear();
+      state.entryFilter = "";
       renderProbe();
     }
   });
 
-  $("#url").addEventListener("keydown", (event) => {
+  clearBtn?.addEventListener("click", () => {
+    urlInput.value = "";
+    clearBtn.classList.add("hidden");
+    state.probe = null;
+    state.probeUrl = "";
+    state.selected.clear();
+    state.entryFilter = "";
+    renderProbe();
+    urlInput.focus();
+  });
+
+  urlInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
       analyze();
     }
   });
 
-  $("#paste").addEventListener("click", async () => {
+  $("#paste")?.addEventListener("click", async () => {
     try {
       const text = await navigator.clipboard.readText();
       if (!text.trim()) return;
-      $("#url").value = text.trim();
+      urlInput.value = text.trim();
+      clearBtn?.classList.remove("hidden");
       analyze();
     } catch {
       toast("Clipboard access was blocked — paste manually", "warn");
-      $("#url").focus();
+      urlInput?.focus();
     }
   });
 
-  $("#quality-chips").addEventListener("click", (event) => {
+  $("#quality-chips")?.addEventListener("click", (event) => {
     const chip = event.target.closest(".chip");
     if (!chip) return;
     setQuality(chip.dataset.quality);
   });
 
-  $("#audioOnly").addEventListener("change", syncAudioUI);
-  $("#cookieUpload").addEventListener("change", (event) => uploadCookies(event.target.files[0]));
-  $("#clear-finished").addEventListener("click", clearFinished);
+  $("#audioOnly")?.addEventListener("change", syncAudioUI);
+  $("#cookieUpload")?.addEventListener("change", (e) => uploadCookies(e.target.files[0]));
+  $("#clear-finished")?.addEventListener("click", clearFinished);
 
-  $("#form").addEventListener("input", savePrefs);
-  $("#form").addEventListener("change", savePrefs);
+  $("#form")?.addEventListener("input", savePrefs);
+  $("#form")?.addEventListener("change", savePrefs);
 
-  $("#probe").addEventListener("click", (event) => {
+  // Probe interaction: Qualities, Playlist search, selection toggle
+  const probeContainer = $("#probe");
+  probeContainer?.addEventListener("click", (event) => {
     const quality = event.target.closest("[data-set-quality]");
     if (quality) {
       const height = quality.dataset.setQuality;
@@ -999,77 +1392,71 @@ function bindEvents() {
       setQuality(known.includes(height) ? height : "best");
       return;
     }
-    const showAll = event.target.closest("#show-all");
-    if (showAll) {
-      state.showAll = true;
-      renderEntries();
+
+    if (event.target.closest("#probe-select-all")) {
+      if (state.probe && state.probe.entries) {
+        state.probe.entries.forEach((e) => state.selected.add(e.url));
+        renderProbe();
+      }
       return;
     }
-    const button = event.target.closest("button");
-    if (!button || !state.probe) return;
-    if (button.id === "sel-all") selectAll(state.probe.entries);
-    else if (button.id === "sel-none") {
+
+    if (event.target.closest("#probe-select-none")) {
       state.selected.clear();
-      renderEntries();
-    } else if (button.id === "sel-invert") {
-      const next = new Set();
-      for (const entry of state.probe.entries) {
-        if (!state.selected.has(entry.url)) next.add(entry.url);
+      renderProbe();
+      return;
+    }
+
+    const entryRow = event.target.closest(".probe-entry-row");
+    if (entryRow) {
+      const url = entryRow.dataset.entryUrl;
+      const checkbox = entryRow.querySelector(".probe-entry-checkbox");
+      if (state.selected.has(url)) {
+        state.selected.delete(url);
+        entryRow.classList.remove("is-selected");
+        if (checkbox) checkbox.checked = false;
+      } else {
+        state.selected.add(url);
+        entryRow.classList.add("is-selected");
+        if (checkbox) checkbox.checked = true;
       }
-      state.selected = next;
-      renderEntries();
-    } else if (button.id === "apply-range") {
-      const input = $("#rangeInput");
-      try {
-        const indexes = parseSpec(input.value, state.probe.entries.length);
-        if (indexes === null) selectAll(state.probe.entries);
-        else {
-          state.selected = new Set(indexes.map((index) => state.probe.entries[index - 1].url));
-          renderEntries();
-        }
-        toast(`${state.selected.size} part${state.selected.size === 1 ? "" : "s"} selected`, "ok");
-      } catch (error) {
-        toast(error.message, "err");
+      const countEl = $("#probe-selected-count");
+      if (countEl) countEl.textContent = String(state.selected.size);
+    }
+  });
+
+  probeContainer?.addEventListener("input", (event) => {
+    if (event.target.id === "probe-entry-search") {
+      state.entryFilter = event.target.value.trim();
+      renderProbe();
+      const input = $("#probe-entry-search");
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
       }
     }
   });
 
-  $("#probe").addEventListener("change", (event) => {
-    if (!event.target.classList.contains("entry-check")) return;
-    const url = event.target.dataset.url;
-    if (event.target.checked) state.selected.add(url);
-    else state.selected.delete(url);
-    const count = $("#sel-count");
-    if (count && state.probe) {
-      count.textContent = `${state.selected.size} of ${state.probe.entries.length} selected`;
-    }
-  });
+  // Job Cards list click delegation
+  $("#jobs")?.addEventListener("click", handleJobAction);
+  $("#history-tbody")?.addEventListener("click", handleJobAction);
 
-  $("#probe").addEventListener("input", (event) => {
-    if (event.target.id !== "entryFilter") return;
-    state.entryFilter = event.target.value;
-    renderEntries();
-  });
-
-  $("#probe").addEventListener("keydown", (event) => {
-    if (event.target.id === "rangeInput" && event.key === "Enter") {
-      event.preventDefault();
-      const apply = $("#apply-range");
-      if (apply) apply.click();
-    }
-  });
-
-  $("#jobs").addEventListener("click", handleJobAction);
-
+  // Global Shortcuts
   document.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
-      $("#form").requestSubmit();
+      $("#form")?.requestSubmit();
+    }
+    if (event.key === "/" && document.activeElement !== urlInput && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
+      event.preventDefault();
+      switchPage("overview");
+      urlInput?.focus();
     }
   });
 }
 
 async function init() {
+  applyTheme(state.theme);
   loadPrefs();
   bindEvents();
   renderProbe();
@@ -1078,7 +1465,6 @@ async function init() {
   await loadSystem();
   connectEvents();
   startPolling();
-  // Refresh system info occasionally so transport/ffmpeg badges stay honest.
   setInterval(loadSystem, 60000);
 }
 

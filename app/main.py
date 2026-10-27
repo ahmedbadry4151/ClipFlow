@@ -12,10 +12,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import router as api_router
+from .api import init_probe_pool, router as api_router, shutdown_probe_pool
 from .config import Settings, get_settings
 from .events import EventBus
 from .manager import JobManager
+from .ratelimit import RateLimiter
 from .store import Store
 
 log = logging.getLogger("turbotube")
@@ -38,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         loop = asyncio.get_running_loop()
+        init_probe_pool(max_workers=min(8, getattr(settings, "max_concurrent_downloads", 4) + 2))
         bus = EventBus()
         bus.attach_loop(loop)
         store = Store(settings.data_path / "turbotube.db")
@@ -55,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             manager.shutdown()
+            shutdown_probe_pool()
             store.close()
 
     app = FastAPI(
@@ -75,9 +78,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["*"],
         )
 
+    # Rate limiting
+    rate_limiter = RateLimiter(max_requests=settings.rate_limit_rpm) if getattr(settings, "rate_limit_rpm", 0) > 0 else None
+
     @app.middleware("http")
     async def security_and_auth(request: Request, call_next):
         path = request.url.path
+        if rate_limiter and path.startswith("/api") and request.method == "POST":
+            client_ip = request.client.host if request.client else "unknown"
+            if not rate_limiter.allow(client_ip):
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Too many requests — try again shortly"},
+                )
+
         if settings.api_key and path.startswith("/api") and path != "/api/health":
             supplied = (
                 request.headers.get("x-api-key")
